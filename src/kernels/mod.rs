@@ -1,11 +1,15 @@
 use crate::Tensor;
+use rayon::prelude::*;
 
 pub mod activations;
 pub mod binary;
+pub mod concat;
 pub mod matmul;
 pub mod reduce;
 
+pub use activations::{relu, relu_backward, scalar_mul, softmax};
 pub use binary::add;
+pub use concat::cat_2d;
 pub use matmul::matmul;
 pub use reduce::{sum_all, sum_axis};
 
@@ -50,4 +54,31 @@ pub fn fill<T: bytemuck::Pod>(tensor: &Tensor, value: T) {
     };
 
     strided_loop(0, shape, strides, 0, &mut write_val);
+}
+
+/// Copies data from a potentially non-contiguous tensor into a strictly contiguous output tensor.
+pub fn copy(from: &Tensor, to: &Tensor) {
+    assert_eq!(from.shape, to.shape);
+    let num_elements = from.shape.num_elements();
+
+    let in_shape = from.shape.dims();
+    let in_strides = from.strides.steps();
+    let in_base = from.byte_offset / std::mem::size_of::<f32>();
+    let in_ptr = crate::kernels::binary::SyncPtr(from.storage.as_ptr() as *const f32);
+
+    let out_ptr = crate::kernels::binary::SyncMutPtr(to.storage.as_mut_ptr() as *mut f32);
+
+    (0..num_elements).into_par_iter().for_each(|i| {
+        let mut offset = 0isize;
+        let mut idx = i;
+        for d in (0..in_shape.len()).rev() {
+            let dim_size = in_shape[d];
+            let coord = idx % dim_size;
+            idx /= dim_size;
+            offset += coord as isize * in_strides[d];
+        }
+        unsafe {
+            *out_ptr.get().add(i) = *in_ptr.get().add(offset as usize + in_base);
+        }
+    });
 }

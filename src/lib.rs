@@ -18,5 +18,6 @@ pub use dtype::DType;
 pub use gpu::GpuContext;
 pub use layout::{Shape, Strides};
 pub use nn::Linear;
+pub use nn::MultiHeadAttention; // <--- Added this!
 pub use storage::CpuStorage;
 pub use tensor::{Tensor, TensorId};

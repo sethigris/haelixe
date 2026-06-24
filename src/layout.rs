@@ -90,6 +90,13 @@ impl Shape {
         dims.reverse();
         Self(dims)
     }
+
+    /// Swaps two dimensions (e.g., turning [Batch, Seq, Heads, Dim] into [Batch, Heads, Seq, Dim])
+    pub fn transpose(&self, dim1: usize, dim2: usize) -> Self {
+        let mut data = self.0.clone();
+        data.swap(dim1, dim2);
+        Self(data)
+    }
 }
 
 impl Strides {
@@ -144,5 +151,12 @@ impl Strides {
         let mut steps = self.0.clone();
         steps.reverse();
         Self(steps)
+    }
+
+    /// Swaps two dimensions (e.g., turning [Batch, Seq, Heads, Dim] into [Batch, Heads, Seq, Dim])
+    pub fn transpose(&self, dim1: usize, dim2: usize) -> Self {
+        let mut data = self.0.clone();
+        data.swap(dim1, dim2);
+        Self(data)
     }
 }

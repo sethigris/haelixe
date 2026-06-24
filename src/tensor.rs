@@ -404,4 +404,142 @@ impl Tensor {
             self.to(Device::Cpu)
         }
     }
+
+    pub fn mul_scalar(&self, scalar: f32) -> Tensor {
+        let out = crate::kernels::scalar_mul(self, scalar);
+        if self.requires_grad {
+            // The derivative of (x * c) is just (grad * c)
+            let op = std::sync::Arc::new(crate::ops::scalar_mul::ScalarMulOp { scalar });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
+
+    pub fn softmax(&self) -> Tensor {
+        let out = crate::kernels::softmax(self);
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::softmax::SoftmaxOp {
+                output: out.clone(),
+            });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
+
+    pub fn is_contiguous(&self) -> bool {
+        self.strides == self.shape.contiguous_strides()
+    }
+
+    /// Forces a non-contiguous tensor to become contiguous in memory by copying data.
+    pub fn contiguous(&self) -> Tensor {
+        if self.is_contiguous() {
+            return self.clone();
+        }
+        let out = Tensor::empty(self.dtype, self.shape.clone());
+        crate::kernels::copy(self, &out);
+        out
+    }
+
+    /// Zero-cost reshaping. If the tensor is non-contiguous, it forces a copy first.
+    pub fn view(&self, new_shape: Shape) -> Tensor {
+        assert_eq!(
+            self.shape.num_elements(),
+            new_shape.num_elements(),
+            "Cannot view: element count mismatch"
+        );
+
+        let base = if self.is_contiguous() {
+            self.clone()
+        } else {
+            self.contiguous()
+        };
+
+        let out = Tensor {
+            id: TensorId::next(),
+            dtype: base.dtype,
+            shape: new_shape.clone(),
+            strides: new_shape.contiguous_strides(),
+            storage: base.storage,
+            byte_offset: base.byte_offset,
+            device: base.device,
+            requires_grad: base.requires_grad,
+            grad: None,
+            node: None,
+        };
+
+        if base.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::view::ViewOp {
+                original_shape: self.shape.clone(),
+            });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
+
+    /// Zero-cost transposition. Just swaps shapes and strides!
+    pub fn transpose(&self, dim1: usize, dim2: usize) -> Tensor {
+        let out = Tensor {
+            id: TensorId::next(),
+            dtype: self.dtype,
+            shape: self.shape.transpose(dim1, dim2),
+            strides: self.strides.transpose(dim1, dim2),
+            storage: self.storage.clone(),
+            byte_offset: self.byte_offset,
+            device: self.device.clone(),
+            requires_grad: self.requires_grad,
+            grad: None,
+            node: None,
+        };
+
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::transpose::TransposeOp { dim1, dim2 });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
+
+    /// Systems trick for Batched MatMul: Extracts a 2D slice from a 3D tensor [Batch, M, N]
+    /// without copying memory, by just shifting the byte_offset!
+    pub fn get_2d_slice(&self, batch_idx: usize) -> Tensor {
+        assert_eq!(self.rank(), 3);
+        let m = self.shape.dims()[1];
+        let n = self.shape.dims()[2];
+        let stride_0 = self.strides.steps()[0];
+        let byte_shift = (batch_idx as isize * stride_0) as usize * self.dtype.size_in_bytes();
+
+        Tensor {
+            id: TensorId::next(),
+            dtype: self.dtype,
+            shape: Shape::new([m, n]),
+            strides: Shape::new([m, n]).contiguous_strides(),
+            storage: self.storage.clone(),
+            byte_offset: self.byte_offset + byte_shift,
+            device: self.device.clone(),
+            requires_grad: false, // Internal view for manual batching
+            grad: None,
+            node: None,
+        }
+    }
+
+    /// Concatenates a list of 2D tensors along a new leading dimension (dim 0).
+    /// Fully integrated into the Autograd graph.
+    pub fn cat(tensors: &[Tensor]) -> Tensor {
+        let out = crate::kernels::cat_2d(tensors);
+        let requires_grad = tensors.iter().any(|t| t.requires_grad);
+
+        if requires_grad {
+            let op = std::sync::Arc::new(crate::ops::cat::CatOp {
+                n: tensors.len(),
+                s: tensors[0].shape.dims()[0],
+                d: tensors[0].shape.dims()[1],
+            });
+            out.with_node(op, tensors.to_vec())
+        } else {
+            out
+        }
+    }
 }

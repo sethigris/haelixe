@@ -4,26 +4,22 @@ use rayon::prelude::*;
 // Raw pointers are not `Send` or `Sync` by default in Rust.
 // Since we manually guarantee thread safety (our parallel iterator ensures
 // no overlapping mutable accesses), we opt-in.
-struct SyncPtr<T>(*const T);
+pub struct SyncPtr<T>(pub *const T);
 unsafe impl<T> Send for SyncPtr<T> {}
 unsafe impl<T> Sync for SyncPtr<T> {}
-
 impl<T> SyncPtr<T> {
-    // Adding this getter forces closures to capture the `SyncPtr` struct
-    // itself, rather than just the raw `*const T` field inside it.
     #[inline(always)]
-    fn get(&self) -> *const T {
+    pub fn get(&self) -> *const T {
         self.0
     }
 }
 
-struct SyncMutPtr<T>(*mut T);
+pub struct SyncMutPtr<T>(pub *mut T);
 unsafe impl<T> Send for SyncMutPtr<T> {}
 unsafe impl<T> Sync for SyncMutPtr<T> {}
-
 impl<T> SyncMutPtr<T> {
     #[inline(always)]
-    fn get(&self) -> *mut T {
+    pub fn get(&self) -> *mut T {
         self.0
     }
 }

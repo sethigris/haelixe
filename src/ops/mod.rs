@@ -1,8 +1,14 @@
 pub mod add;
+pub mod cat;
 pub mod linear_fused;
 pub mod matmul;
 pub mod relu;
+pub mod scalar_mul;
+pub mod softmax;
 pub mod sum;
+pub mod transpose;
+pub mod view;
+
 use crate::{Op, Shape, Tensor};
 
 #[derive(Debug)]

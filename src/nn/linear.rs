@@ -1,5 +1,5 @@
 use crate::ops::linear_fused::FusedLinearOp;
-use crate::{DType, Device, GpuContext, Shape, Tensor};
+use crate::{DType, Shape, Tensor};
 use std::sync::Arc;
 
 pub struct Linear {
@@ -31,30 +31,28 @@ impl Linear {
     }
 
     pub fn forward(&self, x: &Tensor) -> Tensor {
-        // DEVICE DISPATCH: If everything is on GPU, use the fused WGSL shader!
-        if x.device.is_gpu() && self.weight.device.is_gpu() && self.bias.device.is_gpu() {
-            let ctx = match &x.device {
-                Device::Gpu(c) => c.clone(),
-                _ => unreachable!(),
-            };
+        if x.rank() == 3 {
+            // Systems Trick for Transformers: Flatten [Batch, Seq, In] -> [Batch*Seq, In]
+            let b = x.shape.dims()[0];
+            let s = x.shape.dims()[1];
+            let in_f = x.shape.dims()[2];
+            let out_f = self.weight.shape.dims()[1];
 
-            let out = GpuContext::fused_linear(&ctx, x, &self.weight, &self.bias);
+            let x_flat = x.view(crate::Shape::new([b * s, in_f]));
+            let out_flat = x_flat.matmul(&self.weight);
+            let out_biased = out_flat.add(&self.bias);
 
-            // Attach the Autograd node so backprop works
-            if x.requires_grad || self.weight.requires_grad || self.bias.requires_grad {
-                let op = Arc::new(FusedLinearOp {
-                    x: x.clone(),
-                    w: self.weight.clone(),
-                    bias: self.bias.clone(),
-                });
-                out.with_node(op, vec![x.clone(), self.weight.clone(), self.bias.clone()])
-            } else {
-                out
-            }
-        } else {
-            // Fallback to unfused CPU/GPU ops
+            // Reshape back to [Batch, Seq, Out]
+            out_biased.view(crate::Shape::new([b, s, out_f]))
+        } else if x.rank() == 2 {
+            // Standard 2D forward
             let out = x.matmul(&self.weight);
-            out.add(&self.bias).relu()
+            out.add(&self.bias)
+        } else {
+            panic!(
+                "Linear layer currently only supports 2D and 3D inputs, got {}D",
+                x.rank()
+            );
         }
     }
 }

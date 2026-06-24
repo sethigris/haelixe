@@ -1,68 +1,39 @@
-use axiom::{DType, Device, Linear, Shape, Tensor, optim};
+use axiom::{DType, MultiHeadAttention, Shape, Tensor};
 use std::time::Instant;
 
 fn main() {
-    println!("Full GPU Training Loop (with GPU SGD)\n");
+    println!("Testing Multi-Head Attention (Transformer)\n");
 
-    let gpu_device = Device::gpu();
+    let batch_size = 2;
+    let seq_len = 16;
+    let hidden_dim = 64;
+    let num_heads = 4;
 
-    let batch_size = 256;
-    let in_features = 512;
-    let hidden_features = 512;
-    let out_features = 512;
-    let lr = 0.01;
-
-    let layer1 = Linear::new(in_features, hidden_features);
-    let layer2 = Linear::new(hidden_features, out_features);
-
-    // Move weights to GPU
-    let w1_gpu = layer1.weight.to(gpu_device.clone());
-    let b1_gpu = layer1.bias.to(gpu_device.clone());
-    let w2_gpu = layer2.weight.to(gpu_device.clone());
-    let b2_gpu = layer2.bias.to(gpu_device.clone());
-
-    let gpu_layer1 = Linear {
-        weight: w1_gpu.clone(),
-        bias: b1_gpu.clone(),
-    };
-    let gpu_layer2 = Linear {
-        weight: w2_gpu.clone(),
-        bias: b2_gpu.clone(),
-    };
-
-    // Move input to GPU
-    let x_data: Vec<f32> = (0..batch_size * in_features)
-        .map(|i| (i % 100) as f32 * 0.01)
+    // Dummy input: [Batch, Sequence, Hidden]
+    let x_data: Vec<f32> = (0..batch_size * seq_len * hidden_dim)
+        .map(|i| (i % 10) as f32 * 0.01)
         .collect();
-    let x_gpu = Tensor::from_slice(DType::F32, Shape::new([batch_size, in_features]), &x_data)
-        .to(gpu_device.clone());
+    let x = Tensor::from_slice(
+        DType::F32,
+        Shape::new([batch_size, seq_len, hidden_dim]),
+        &x_data,
+    )
+    .requires_grad_(true);
 
-    println!("Starting 10 training iterations...");
+    let mha = MultiHeadAttention::new(hidden_dim, num_heads);
+
+    println!("Running MHA Forward Pass...");
     let start = Instant::now();
+    let out = mha.forward(&x);
+    println!("Forward pass took: {:?}", start.elapsed());
+    println!("Output shape: {:?} (Should be [2, 16, 64])", out.shape);
 
-    for i in 0..10 {
-        // 1. Forward Pass (Executes via Fused WGSL Compute Shader)
-        let h1 = gpu_layer1.forward(&x_gpu);
-        let h2 = gpu_layer2.forward(&h1);
-        let loss = h2.sum();
+    println!("\nRunning MHA Backward Pass...");
+    let loss = out.sum();
+    let start = Instant::now();
+    let grads = loss.backward();
+    println!("Backward pass took: {:?}", start.elapsed());
 
-        // 2. Backward Pass (Calculates Gradients)
-        let grads = loss.backward();
-
-        // 3. SGD Updates (Executes via GPU Compute Shader!)
-        optim::sgd_step(&w1_gpu, grads.get(&w1_gpu.id).unwrap(), lr);
-        optim::sgd_step(&b1_gpu, grads.get(&b1_gpu.id).unwrap(), lr);
-        optim::sgd_step(&w2_gpu, grads.get(&w2_gpu.id).unwrap(), lr);
-        optim::sgd_step(&b2_gpu, grads.get(&b2_gpu.id).unwrap(), lr);
-
-        if i == 0 {
-            println!(
-                "Iteration 0 complete. W1 is still on device: {:?}",
-                if w1_gpu.device.is_gpu() { "GPU" } else { "CPU" }
-            );
-        }
-    }
-
-    println!("10 iterations took: {:?}", start.elapsed());
-    println!("\n Training complete! Weights never left the GPU during updates.");
+    let x_grad = grads.get(&x.id).unwrap();
+    println!("Input Gradient shape: {:?}", x_grad.shape);
 }
