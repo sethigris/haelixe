@@ -18,6 +18,8 @@ pub struct GpuContext {
     sgd_pipeline: wgpu::ComputePipeline,
     sgd_bind_group_layout: wgpu::BindGroupLayout,
     pub arena: arena::GpuMemoryArena,
+    batched_matmul_pipeline: wgpu::ComputePipeline,
+    batched_matmul_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
@@ -311,6 +313,75 @@ impl GpuContext {
             compilation_options: Default::default(),
         });
 
+        // --- Batched MatMul Pipeline ---
+        let batched_matmul_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("batched_matmul_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/batched_matmul.wgsl").into()),
+        });
+
+        let batched_matmul_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("batched_matmul_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let batched_matmul_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("batched_matmul_pipeline_layout"),
+                bind_group_layouts: &[&batched_matmul_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let batched_matmul_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("batched_matmul_pipeline"),
+                layout: Some(&batched_matmul_pipeline_layout),
+                module: &batched_matmul_shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            });
+
         Arc::new(Self {
             device,
             queue,
@@ -323,6 +394,8 @@ impl GpuContext {
             sgd_pipeline,
             sgd_bind_group_layout: sgd_bind_group_layout,
             arena,
+            batched_matmul_pipeline,
+            batched_matmul_bind_group_layout,
         })
     }
 
@@ -742,6 +815,106 @@ impl GpuContext {
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
         ctx.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    pub fn batched_matmul_gpu_resident(
+        ctx: &Arc<GpuContext>,
+        a: &Tensor,
+        b: &Tensor,
+        transpose_b: bool,
+        scale: f32,
+    ) -> Tensor {
+        assert!(a.storage.is_gpu() && b.storage.is_gpu());
+        assert_eq!(a.rank(), 3);
+        assert_eq!(b.rank(), 3);
+
+        let batch = a.shape.dims()[0];
+        let m = a.shape.dims()[1];
+        let k = a.shape.dims()[2];
+        let n = if transpose_b {
+            b.shape.dims()[1]
+        } else {
+            b.shape.dims()[2]
+        };
+
+        let out_bytes = batch * m * n * std::mem::size_of::<f32>();
+        let a_alloc = a.storage.get_gpu_allocation().unwrap();
+        let b_alloc = b.storage.get_gpu_allocation().unwrap();
+        let out_alloc = ctx.arena.allocate(out_bytes as u64);
+
+        let t_b = if transpose_b { 1u32 } else { 0u32 };
+        let params_data: [u32; 8] = [
+            batch as u32,
+            m as u32,
+            k as u32,
+            n as u32,
+            scale.to_bits(),
+            t_b,
+            0,
+            0,
+        ];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("batched_matmul_params"),
+                contents: bytemuck::cast_slice(&params_data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("batched_matmul_bg"),
+            layout: &ctx.batched_matmul_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&ctx.batched_matmul_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+
+            // Z dimension handles the batch!
+            let wg_x = ((n + 15) / 16) as u32;
+            let wg_y = ((m + 15) / 16) as u32;
+            let wg_z = batch as u32;
+            pass.dispatch_workgroups(wg_x, wg_y, wg_z);
+        }
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        Tensor {
+            id: TensorId::next(),
+            dtype: DType::F32,
+            shape: Shape::new([batch, m, n]),
+            strides: Shape::new([batch, m, n]).contiguous_strides(),
+            storage: Arc::new(CpuStorage::from_gpu_allocation(out_alloc)),
+            byte_offset: 0,
+            device: Device::Gpu(ctx.clone()),
+            requires_grad: false,
+            grad: None,
+            node: None,
+        }
     }
 }
 

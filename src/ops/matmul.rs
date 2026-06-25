@@ -12,13 +12,27 @@ impl Op for MatMulOp {
     }
 
     fn backward(&self, grad_output: &Tensor) -> Vec<Option<Tensor>> {
-        // Calculus for MatMul: Y = A @ B
-        // dL/dA = dL/dY @ B^T
-        let grad_a = grad_output.matmul(&self.b.t());
+        let a = &self.a;
+        let b = &self.b;
 
-        // dL/dB = A^T @ dL/dY
-        let grad_b = self.a.t().matmul(grad_output);
+        if a.rank() == 3 && b.rank() == 3 {
+            // 3D Batched MatMul backward pass (Routes to the GPU Batched Shader!)
+            // grad_a = grad_out @ B^T
+            let grad_a = grad_output.batched_matmul(b, true, 1.0);
+            // grad_b = A^T @ grad_out
+            let grad_b = a.transpose(1, 2).batched_matmul(grad_output, false, 1.0);
 
-        vec![Some(grad_a), Some(grad_b)]
+            vec![Some(grad_a), Some(grad_b)]
+        } else {
+            // 2D Fallback
+            let a_cpu = a.ensure_cpu();
+            let b_cpu = b.ensure_cpu();
+            let grad_out_cpu = grad_output.ensure_cpu();
+
+            let grad_a = grad_out_cpu.matmul(&b_cpu.t());
+            let grad_b = a_cpu.t().matmul(&grad_out_cpu);
+
+            vec![Some(grad_a), Some(grad_b)]
+        }
     }
 }

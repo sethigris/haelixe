@@ -45,43 +45,28 @@ impl MultiHeadAttention {
         let k = k.view(Shape::new([b, s, h, d])).transpose(1, 2);
         let v = v.view(Shape::new([b, s, h, d])).transpose(1, 2);
 
-        // 3. Flatten B and H to reuse 2D MatMul -> [B*H, S, D]
+        // 3. Flatten B and H to reuse 3D Batched MatMul -> [B*H, S, D]
         let q_flat = q.view(Shape::new([b * h, s, d]));
         let k_flat = k.view(Shape::new([b * h, s, d]));
         let v_flat = v.view(Shape::new([b * h, s, d]));
 
-        // 4. Collect attention results in a Vec to preserve the Autograd graph!
-        let mut ctx_list = Vec::with_capacity(b * h);
+        // 4. Batched Attention Math (Zero CPU Loops!)
+        // scores = (Q @ K^T) * scale
+        let scores = q_flat.batched_matmul(&k_flat, true, scale);
 
-        // 5. Batched Attention Loop
-        for i in 0..(b * h) {
-            let q_i = q_flat.get_2d_slice(i); // [S, D]
-            let k_i = k_flat.get_2d_slice(i); // [S, D]
-            let v_i = v_flat.get_2d_slice(i); // [S, D]
+        // Attention Weights = Softmax(Scores)
+        let attn = scores.softmax();
 
-            // Scores = (Q @ K^T) * scale
-            let scores = q_i.matmul(&k_i.t()).mul_scalar(scale);
+        // Context = Attn @ V
+        let ctx = attn.batched_matmul(&v_flat, false, 1.0);
 
-            // Attention Weights = Softmax(Scores)
-            let attn = scores.softmax();
-
-            // Context = Attn @ V
-            let ctx = attn.matmul(&v_i);
-
-            // Push the computed tensor (with its full Autograd history) to the list
-            ctx_list.push(ctx);
-        }
-
-        // 6. Concatenate (Autograd-aware!) and Reassemble heads
-        // This replaces the broken raw `copy` loop!
-        let out_flat = Tensor::cat(&ctx_list); // [B*H, S, D]
-
-        let out = out_flat
+        // 5. Reassemble heads -> [B*H, S, D] -> [B, H, S, D] -> [B, S, H, D] -> [B, S, Hidden]
+        let out = ctx
             .view(Shape::new([b, h, s, d]))
             .transpose(1, 2)
             .view(Shape::new([b, s, h * d]));
 
-        // 7. Final output projection
+        // 6. Final output projection
         self.out_proj.forward(&out)
     }
 }

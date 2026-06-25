@@ -581,4 +581,45 @@ impl Tensor {
             out
         }
     }
+
+    /// 3D Batched Matrix Multiplication with optional transpose and scalar scaling.
+    /// Signature: Out[b, i, j] = scale * sum_k(A[b, i, k] * B[b, k, j])
+    pub fn batched_matmul(&self, other: &Tensor, transpose_b: bool, scale: f32) -> Tensor {
+        let out = if self.rank() == 3
+            && other.rank() == 3
+            && self.device.is_gpu()
+            && other.device.is_gpu()
+        {
+            let ctx = match &self.device {
+                Device::Gpu(c) => c.clone(),
+                _ => unreachable!(),
+            };
+            GpuContext::batched_matmul_gpu_resident(&ctx, self, other, transpose_b, scale)
+        } else {
+            // CPU Fallback (or 2D tensors)
+            let cpu_a = self.ensure_cpu();
+            let cpu_b = other.ensure_cpu();
+            // Simple loop for CPU fallback
+            let b_dim = cpu_a.shape.dims()[0];
+            let mut out_list = Vec::new();
+            for i in 0..b_dim {
+                let a_slice = cpu_a.get_2d_slice(i);
+                let b_slice = cpu_b.get_2d_slice(i);
+                let b_t = if transpose_b { b_slice.t() } else { b_slice };
+                let res = crate::kernels::matmul(&a_slice, &b_t);
+                out_list.push(crate::kernels::scalar_mul(&res, scale));
+            }
+            Tensor::cat(&out_list)
+        };
+
+        if self.requires_grad || other.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::matmul::MatMulOp {
+                a: self.clone(),
+                b: other.clone(),
+            });
+            out.with_node(op, vec![self.clone(), other.clone()])
+        } else {
+            out
+        }
+    }
 }
