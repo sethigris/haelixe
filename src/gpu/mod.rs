@@ -3,6 +3,8 @@ use crate::{CpuStorage, DType, Shape, Tensor, TensorId};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+pub mod arena;
+
 #[derive(Debug)]
 pub struct GpuContext {
     pub device: wgpu::Device,
@@ -15,6 +17,7 @@ pub struct GpuContext {
     fused_linear_bind_group_layout: wgpu::BindGroupLayout,
     sgd_pipeline: wgpu::ComputePipeline,
     sgd_bind_group_layout: wgpu::BindGroupLayout,
+    pub arena: arena::GpuMemoryArena,
 }
 
 impl GpuContext {
@@ -82,6 +85,8 @@ impl GpuContext {
                     },
                 ],
             });
+
+        let arena = arena::GpuMemoryArena::new(&device, 256); // 256MB Arena 
 
         // 6. Create the pipeline layout and the compute pipeline
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -317,6 +322,7 @@ impl GpuContext {
             fused_linear_bind_group_layout: fused_bind_group_layout,
             sgd_pipeline,
             sgd_bind_group_layout: sgd_bind_group_layout,
+            arena,
         })
     }
 
@@ -450,7 +456,6 @@ impl GpuContext {
         }
     }
 
-    /// GPU-resident addition. Both inputs and output stay on GPU.
     pub fn add_gpu_resident(ctx: &Arc<GpuContext>, a: &Tensor, b: &Tensor) -> Tensor {
         assert!(
             a.storage.is_gpu() && b.storage.is_gpu(),
@@ -460,15 +465,11 @@ impl GpuContext {
 
         let bytes = a.shape.num_elements() * std::mem::size_of::<f32>();
 
-        let a_buffer = a.storage.get_gpu_buffer().unwrap();
-        let b_buffer = b.storage.get_gpu_buffer().unwrap();
+        let a_alloc = a.storage.get_gpu_allocation().unwrap();
+        let b_alloc = b.storage.get_gpu_allocation().unwrap();
 
-        let out_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_out"),
-            size: bytes as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        // ARENA ALLOCATION
+        let out_alloc = ctx.arena.allocate(bytes as u64);
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -476,15 +477,15 @@ impl GpuContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: a_buffer.as_entire_binding(),
+                    resource: a_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: b_buffer.as_entire_binding(),
+                    resource: b_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: out_buffer.as_entire_binding(),
+                    resource: out_alloc.as_binding(),
                 },
             ],
         });
@@ -492,7 +493,6 @@ impl GpuContext {
         let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
@@ -503,16 +503,14 @@ impl GpuContext {
             let workgroups = ((a.shape.num_elements() + 255) / 256) as u32;
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
-
         ctx.queue.submit(std::iter::once(encoder.finish()));
 
-        // ONLY ONE device field here!
         Tensor {
             id: TensorId::next(),
             dtype: DType::F32,
             shape: a.shape.clone(),
             strides: a.shape.contiguous_strides(),
-            storage: Arc::new(CpuStorage::from_gpu_buffer(Arc::new(out_buffer))),
+            storage: Arc::new(CpuStorage::from_gpu_allocation(out_alloc)),
             byte_offset: 0,
             device: Device::Gpu(ctx.clone()),
             requires_grad: false,
@@ -523,6 +521,7 @@ impl GpuContext {
 
     /// GPU-resident matrix multiplication: C = A @ B
     /// All inputs and outputs stay on GPU. Uses tiled shared memory for performance.
+
     pub fn matmul_gpu_resident(ctx: &Arc<GpuContext>, a: &Tensor, b: &Tensor) -> Tensor {
         assert!(
             a.storage.is_gpu() && b.storage.is_gpu(),
@@ -539,19 +538,13 @@ impl GpuContext {
 
         let out_bytes = m * n * std::mem::size_of::<f32>();
 
-        let a_buffer = a.storage.get_gpu_buffer().unwrap();
-        let b_buffer = b.storage.get_gpu_buffer().unwrap();
+        let a_alloc = a.storage.get_gpu_allocation().unwrap();
+        let b_alloc = b.storage.get_gpu_allocation().unwrap();
 
-        // Output buffer stays on GPU
-        let out_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("matmul_out"),
-            size: out_bytes as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        // ARENA ALLOCATION
+        let out_alloc = ctx.arena.allocate(out_bytes as u64);
 
-        // Uniform buffer for dimensions [M, K, N]
-        let params_data: [u32; 4] = [m as u32, k as u32, n as u32, 0]; // padded to 16 bytes
+        let params_data: [u32; 4] = [m as u32, k as u32, n as u32, 0];
         let params_buffer = ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -566,15 +559,15 @@ impl GpuContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: a_buffer.as_entire_binding(),
+                    resource: a_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: b_buffer.as_entire_binding(),
+                    resource: b_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: out_buffer.as_entire_binding(),
+                    resource: out_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -588,7 +581,6 @@ impl GpuContext {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("matmul_encoder"),
             });
-
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("matmul_pass"),
@@ -596,13 +588,10 @@ impl GpuContext {
             });
             pass.set_pipeline(&ctx.matmul_pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-
-            // Dispatch: each workgroup handles a TILE_M x TILE_N block
-            let wg_x = ((n + 15) / 16) as u32; // TILE_N = 16
-            let wg_y = ((m + 15) / 16) as u32; // TILE_M = 16
+            let wg_x = ((n + 15) / 16) as u32;
+            let wg_y = ((m + 15) / 16) as u32;
             pass.dispatch_workgroups(wg_x, wg_y, 1);
         }
-
         ctx.queue.submit(std::iter::once(encoder.finish()));
 
         Tensor {
@@ -610,7 +599,7 @@ impl GpuContext {
             dtype: DType::F32,
             shape: Shape::new([m, n]),
             strides: Shape::new([m, n]).contiguous_strides(),
-            storage: Arc::new(CpuStorage::from_gpu_buffer(Arc::new(out_buffer))),
+            storage: Arc::new(CpuStorage::from_gpu_allocation(out_alloc)),
             byte_offset: 0,
             device: Device::Gpu(ctx.clone()),
             requires_grad: false,
@@ -630,16 +619,12 @@ impl GpuContext {
         let n = w.shape.dims()[1];
         let out_bytes = m * n * std::mem::size_of::<f32>();
 
-        let x_buf = x.storage.get_gpu_buffer().unwrap();
-        let w_buf = w.storage.get_gpu_buffer().unwrap();
-        let bias_buf = bias.storage.get_gpu_buffer().unwrap();
+        let x_alloc = x.storage.get_gpu_allocation().unwrap();
+        let w_alloc = w.storage.get_gpu_allocation().unwrap();
+        let bias_alloc = bias.storage.get_gpu_allocation().unwrap();
 
-        let out_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("fused_out"),
-            size: out_bytes as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        // ARENA ALLOCATION
+        let out_alloc = ctx.arena.allocate(out_bytes as u64);
 
         let params_data: [u32; 4] = [m as u32, k as u32, n as u32, 0];
         let params_buf = ctx
@@ -656,19 +641,19 @@ impl GpuContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: x_buf.as_entire_binding(),
+                    resource: x_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: w_buf.as_entire_binding(),
+                    resource: w_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: bias_buf.as_entire_binding(),
+                    resource: bias_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: out_buf.as_entire_binding(),
+                    resource: out_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
@@ -696,7 +681,7 @@ impl GpuContext {
             dtype: DType::F32,
             shape: Shape::new([m, n]),
             strides: Shape::new([m, n]).contiguous_strides(),
-            storage: Arc::new(CpuStorage::from_gpu_buffer(Arc::new(out_buf))),
+            storage: Arc::new(CpuStorage::from_gpu_allocation(out_alloc)),
             byte_offset: 0,
             device: Device::Gpu(ctx.clone()),
             requires_grad: false,
@@ -712,10 +697,10 @@ impl GpuContext {
         );
         assert_eq!(weight.shape, grad.shape);
 
-        let w_buf = weight.storage.get_gpu_buffer().unwrap();
-        let g_buf = grad.storage.get_gpu_buffer().unwrap();
+        let w_alloc = weight.storage.get_gpu_allocation().unwrap();
+        let g_alloc = grad.storage.get_gpu_allocation().unwrap();
 
-        let params_data: [f32; 4] = [lr, 0.0, 0.0, 0.0]; // 16-byte aligned
+        let params_data: [f32; 4] = [lr, 0.0, 0.0, 0.0];
         let params_buf = ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -730,11 +715,11 @@ impl GpuContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: w_buf.as_entire_binding(),
+                    resource: w_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: g_buf.as_entire_binding(),
+                    resource: g_alloc.as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

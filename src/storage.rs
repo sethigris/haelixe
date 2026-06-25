@@ -1,14 +1,14 @@
+use crate::gpu::arena::GpuAllocation;
 use memmap2::Mmap;
 use std::cell::UnsafeCell;
 use std::sync::Arc;
-use wgpu::Buffer;
 
 /// The physical backing of the memory.
 #[derive(Debug)]
 pub enum Backing {
     Owned(UnsafeCell<Vec<u8>>),
     Mmap(Arc<Mmap>),
-    Gpu(Arc<Buffer>), // GPU-resident buffer
+    Gpu(GpuAllocation), // Uses the new Arena Allocation
 }
 
 #[derive(Debug)]
@@ -49,9 +49,10 @@ impl CpuStorage {
         }
     }
 
-    pub fn from_gpu_buffer(buffer: Arc<Buffer>) -> Self {
+    /// Creates a CpuStorage backed by a slice of the GPU Memory Arena
+    pub fn from_gpu_allocation(alloc: GpuAllocation) -> Self {
         Self {
-            data: Backing::Gpu(buffer),
+            data: Backing::Gpu(alloc),
         }
     }
 
@@ -77,9 +78,10 @@ impl CpuStorage {
         matches!(&self.data, Backing::Gpu(_))
     }
 
-    pub fn get_gpu_buffer(&self) -> Option<&Arc<Buffer>> {
+    /// Extracts the GPU Allocation from the storage backend
+    pub fn get_gpu_allocation(&self) -> Option<&GpuAllocation> {
         match &self.data {
-            Backing::Gpu(buf) => Some(buf),
+            Backing::Gpu(alloc) => Some(alloc),
             _ => None,
         }
     }
