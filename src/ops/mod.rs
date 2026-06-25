@@ -1,6 +1,7 @@
 pub mod add;
 pub mod cat;
 pub mod contiguous;
+pub mod layer_norm;
 pub mod linear_fused;
 pub mod matmul;
 pub mod relu;
@@ -10,7 +11,6 @@ pub mod softmax;
 pub mod sum;
 pub mod transpose;
 pub mod view;
-
 use crate::{Op, Shape, Tensor};
 
 #[derive(Debug)]

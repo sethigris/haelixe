@@ -1,6 +1,7 @@
-use crate::{Linear, Shape, Tensor};
+use crate::{LayerNorm, Linear, Shape, Tensor};
 
 pub struct MultiHeadAttention {
+    pub norm: LayerNorm,
     pub q_proj: Linear,
     pub k_proj: Linear,
     pub v_proj: Linear,
@@ -19,6 +20,7 @@ impl MultiHeadAttention {
         let head_dim = hidden_dim / num_heads;
 
         Self {
+            norm: LayerNorm::new(hidden_dim, 1e-5),
             q_proj: Linear::new(hidden_dim, hidden_dim),
             k_proj: Linear::new(hidden_dim, hidden_dim),
             v_proj: Linear::new(hidden_dim, hidden_dim),
@@ -35,10 +37,12 @@ impl MultiHeadAttention {
         let d = self.head_dim;
         let scale = 1.0 / (d as f32).sqrt();
 
-        // 1. Project Q, K, V -> [B, S, Hidden]
-        let q = self.q_proj.forward(x);
-        let k = self.k_proj.forward(x);
-        let v = self.v_proj.forward(x);
+        // Pre-LN: Normalize before projecting!
+        let x_norm = self.norm.forward(x);
+
+        let q = self.q_proj.forward(&x_norm);
+        let k = self.k_proj.forward(&x_norm);
+        let v = self.v_proj.forward(&x_norm);
 
         // 2. Split heads -> [B, S, H, D] -> Transpose to [B, H, S, D]
         let q = q.view(Shape::new([b, s, h, d])).transpose(1, 2);

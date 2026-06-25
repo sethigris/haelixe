@@ -76,6 +76,22 @@ impl Tensor {
         }
     }
 
+    /// Creates a tensor filled with 1.0s.
+    pub fn ones(dtype: DType, shape: Shape) -> Self {
+        let num_elements = shape.num_elements();
+        match dtype {
+            DType::F32 => {
+                let data = vec![1.0f32; num_elements];
+                Self::from_slice(dtype, shape, &data)
+            }
+            DType::F64 => {
+                let data = vec![1.0f64; num_elements];
+                Self::from_slice(dtype, shape, &data)
+            }
+            _ => panic!("Tensor::ones currently only supports F32 and F64"),
+        }
+    }
+
     pub fn from_slice<T: bytemuck::Pod>(dtype: DType, shape: Shape, data: &[T]) -> Self {
         let bytes = bytemuck::cast_slice(data);
         let strides = shape.contiguous_strides();

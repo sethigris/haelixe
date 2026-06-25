@@ -4,12 +4,14 @@ use rayon::prelude::*;
 pub mod activations;
 pub mod binary;
 pub mod concat;
+pub mod layer_norm;
 pub mod matmul;
 pub mod reduce;
 
 pub use activations::{relu, relu_backward, scalar_mul, softmax};
 pub use binary::add;
 pub use concat::cat_2d;
+pub use layer_norm::{layer_norm_backward, layer_norm_forward};
 pub use matmul::matmul;
 pub use reduce::{sum_all, sum_axis};
 
