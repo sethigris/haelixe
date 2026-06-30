@@ -22,6 +22,8 @@ pub struct GpuContext {
     batched_matmul_bind_group_layout: wgpu::BindGroupLayout,
     adamw_pipeline: wgpu::ComputePipeline,
     adamw_bind_group_layout: wgpu::BindGroupLayout,
+    flash_attn_pipeline: wgpu::ComputePipeline,
+    flash_attn_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
@@ -467,6 +469,85 @@ impl GpuContext {
             compilation_options: Default::default(),
         });
 
+        // --- Flash Attention Pipeline ---
+        let flash_attn_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flash_attn_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flash_attention.wgsl").into()),
+        });
+
+        let flash_attn_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("flash_attn_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let flash_attn_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("flash_attn_pipeline_layout"),
+                bind_group_layouts: &[&flash_attn_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let flash_attn_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("flash_attn_pipeline"),
+                layout: Some(&flash_attn_pipeline_layout),
+                module: &flash_attn_shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            });
+
         Arc::new(Self {
             device,
             queue,
@@ -483,6 +564,8 @@ impl GpuContext {
             batched_matmul_bind_group_layout,
             adamw_bind_group_layout: adamw_bind_group_layout,
             adamw_pipeline: adamw_pipeline,
+            flash_attn_pipeline,
+            flash_attn_bind_group_layout,
         })
     }
 
@@ -1061,6 +1144,90 @@ impl GpuContext {
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
         ctx.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    pub fn flash_attention_gpu(
+        ctx: &Arc<GpuContext>,
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        scale: f32,
+    ) -> Tensor {
+        assert!(q.storage.is_gpu() && k.storage.is_gpu() && v.storage.is_gpu());
+        let bh = q.shape.dims()[0];
+        let seq_len = q.shape.dims()[1];
+        let head_dim = q.shape.dims()[2];
+
+        let out_bytes = bh * seq_len * head_dim * std::mem::size_of::<f32>();
+        let q_alloc = q.storage.get_gpu_allocation().unwrap();
+        let k_alloc = k.storage.get_gpu_allocation().unwrap();
+        let v_alloc = v.storage.get_gpu_allocation().unwrap();
+        let out_alloc = ctx.arena.allocate(&ctx.device, out_bytes as u64);
+
+        let params_data: [u32; 4] = [bh as u32, seq_len as u32, head_dim as u32, scale.to_bits()];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("flash_attn_params"),
+                contents: bytemuck::cast_slice(&params_data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flash_attn_bg"),
+            layout: &ctx.flash_attn_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: q_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: k_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: v_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: out_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&ctx.flash_attn_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            let wg_x = bh as u32;
+            let wg_y = ((seq_len + 15) / 16) as u32; // Blocks of 16 queries
+            pass.dispatch_workgroups(wg_x, wg_y, 1);
+        }
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        Tensor {
+            id: TensorId::next(),
+            dtype: DType::F32,
+            shape: Shape::new([bh, seq_len, head_dim]),
+            strides: Shape::new([bh, seq_len, head_dim]).contiguous_strides(),
+            storage: Arc::new(CpuStorage::from_gpu_allocation(out_alloc)),
+            byte_offset: 0,
+            device: Device::Gpu(ctx.clone()),
+            requires_grad: false,
+            grad: None,
+            node: None,
+        }
     }
 }
 

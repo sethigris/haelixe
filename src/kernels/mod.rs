@@ -8,7 +8,7 @@ pub mod layer_norm;
 pub mod matmul;
 pub mod reduce;
 
-pub use activations::{relu, relu_backward, scalar_mul, softmax};
+pub use activations::{relu, relu_backward, scalar_mul, softmax, softmax_backward};
 pub use binary::add;
 pub use concat::cat_2d;
 pub use layer_norm::{layer_norm_backward, layer_norm_forward};

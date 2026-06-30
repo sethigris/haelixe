@@ -54,15 +54,16 @@ impl MultiHeadAttention {
         let k_flat = k.view(Shape::new([b * h, s, d]));
         let v_flat = v.view(Shape::new([b * h, s, d]));
 
-        // 4. Batched Attention Math (Zero CPU Loops!)
-        // scores = (Q @ K^T) * scale
-        let scores = q_flat.batched_matmul(&k_flat, true, scale);
+        // FIX: LayerNorm forces tensors to CPU. We must explicitly move
+        // them to the GPU to trigger the Flash-Attention WGSL shader!
+        let gpu_device = crate::Device::gpu();
+        let q_gpu = q_flat.to(gpu_device.clone());
+        let k_gpu = k_flat.to(gpu_device.clone());
+        let v_gpu = v_flat.to(gpu_device.clone());
 
-        // Attention Weights = Softmax(Scores)
-        let attn = scores.softmax();
-
-        // Context = Attn @ V
-        let ctx = attn.batched_matmul(&v_flat, false, 1.0);
+        // 4. Flash-Attention (Zero O(N^2) VRAM allocation!)
+        // The shader computes Q*K^T, Softmax, and multiplies by V all in L1 Cache!
+        let ctx = q_gpu.flash_attention(&k_gpu, &v_gpu, scale);
 
         // 5. Reassemble heads -> [B*H, S, D] -> [B, H, S, D] -> [B, S, H, D] -> [B, S, Hidden]
         let out = ctx

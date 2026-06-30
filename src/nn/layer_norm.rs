@@ -21,8 +21,9 @@ impl LayerNorm {
     }
 
     pub fn forward(&self, x: &Tensor) -> Tensor {
+        let x = x.to(self.weight.device.clone());
         let (out, mean, rstd) =
-            crate::kernels::layer_norm_forward(x, &self.weight, &self.bias, self.eps);
+            crate::kernels::layer_norm_forward(&x, &self.weight, &self.bias, self.eps);
 
         if x.requires_grad || self.weight.requires_grad || self.bias.requires_grad {
             let op = Arc::new(crate::ops::layer_norm::LayerNormOp {

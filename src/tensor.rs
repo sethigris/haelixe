@@ -292,14 +292,10 @@ impl Tensor {
             return self.clone();
         }
 
-        match (&self.device, &device) {
+        let out = match (&self.device, &device) {
             (Device::Cpu, Device::Gpu(gpu_ctx)) => {
                 let data = self.to_contiguous_bytes();
-
-                // 1. Allocate space using the Caching Allocator
-                let alloc = gpu_ctx.arena.allocate(&gpu_ctx.device, data.len() as u64); // <--- FIXED
-
-                // 2. Create a temporary staging buffer to hold the CPU bytes
+                let alloc = gpu_ctx.arena.allocate(&gpu_ctx.device, data.len() as u64);
                 let staging =
                     gpu_ctx
                         .device
@@ -308,12 +304,10 @@ impl Tensor {
                             contents: &data,
                             usage: wgpu::BufferUsages::COPY_SRC,
                         });
-
-                // 3. Copy from staging -> Cached Buffer
                 let mut encoder = gpu_ctx
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                encoder.copy_buffer_to_buffer(&staging, 0, &alloc.buffer, 0, data.len() as u64); // <--- FIXED offset to 0
+                encoder.copy_buffer_to_buffer(&staging, 0, &alloc.buffer, 0, data.len() as u64);
                 gpu_ctx.queue.submit(std::iter::once(encoder.finish()));
 
                 Tensor {
@@ -331,7 +325,6 @@ impl Tensor {
             }
             (Device::Gpu(_), Device::Cpu) => {
                 let bytes = self.download_from_gpu();
-
                 Tensor {
                     id: TensorId::next(),
                     dtype: self.dtype,
@@ -345,7 +338,16 @@ impl Tensor {
                     node: None,
                 }
             }
+            (Device::Gpu(_), Device::Gpu(_)) => self.clone(),
             _ => panic!("Unsupported device transfer"),
+        };
+
+        // Preserve the Autograd graph across PCIe transfers!
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::contiguous::ContiguousOp);
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
         }
     }
 
@@ -416,14 +418,12 @@ impl Tensor {
         result
     }
 
-    /// Ensures tensor data is accessible on CPU.
-    /// If already on CPU, returns self. If on GPU, downloads and returns new CPU tensor.
-    /// This is a temporary bridge for CPU-only kernels operating on GPU tensors.
+    /// Ensures the tensor is on the CPU. If it's on the GPU, it seamlessly downloads it.
     pub fn ensure_cpu(&self) -> Tensor {
         if self.device.is_cpu() {
             self.clone()
         } else {
-            self.to(Device::Cpu)
+            self.to(crate::Device::Cpu)
         }
     }
 
@@ -454,16 +454,27 @@ impl Tensor {
         self.strides == self.shape.contiguous_strides()
     }
 
-    /// Forces a non-contiguous tensor to become contiguous in memory by copying data.
+    /// Forces a non-contiguous tensor to become contiguous in memory.
     pub fn contiguous(&self) -> Tensor {
         if self.is_contiguous() {
             return self.clone();
         }
 
-        let out = Tensor::empty(self.dtype, self.shape.clone());
-        crate::kernels::copy(self, &out);
+        let out = if self.device.is_gpu() {
+            // GPU STRIDE TRAP:
+            // Our GPU kernels assume contiguous memory. If a GPU tensor is non-contiguous
+            // (e.g. from a zero-cost transpose), we must download it, physically copy it
+            // on the CPU to respect the strides, and upload it back to VRAM.
+            let cpu_tensor = self.to(crate::Device::Cpu);
+            let cpu_out = Tensor::empty(self.dtype, self.shape.clone());
+            crate::kernels::copy(&cpu_tensor, &cpu_out);
+            cpu_out.to(self.device.clone())
+        } else {
+            let cpu_out = Tensor::empty(self.dtype, self.shape.clone());
+            crate::kernels::copy(self, &cpu_out);
+            cpu_out
+        };
 
-        // FIX: Attach the Autograd node so gradients can flow back through the memory copy!
         if self.requires_grad {
             let op = std::sync::Arc::new(crate::ops::contiguous::ContiguousOp);
             out.with_node(op, vec![self.clone()])
@@ -620,6 +631,30 @@ impl Tensor {
                 b: other.clone(),
             });
             out.with_node(op, vec![self.clone(), other.clone()])
+        } else {
+            out
+        }
+    }
+
+    pub fn flash_attention(&self, k: &Tensor, v: &Tensor, scale: f32) -> Tensor {
+        let out = if self.device.is_gpu() {
+            let ctx = match &self.device {
+                Device::Gpu(c) => c.clone(),
+                _ => unreachable!(),
+            };
+            GpuContext::flash_attention_gpu(&ctx, self, k, v, scale)
+        } else {
+            panic!("FlashAttention currently requires GPU");
+        };
+
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::flash_attention::FlashAttentionOp {
+                q: self.clone(),
+                k: k.clone(),
+                v: v.clone(),
+                scale,
+            });
+            out.with_node(op, vec![self.clone(), k.clone(), v.clone()])
         } else {
             out
         }

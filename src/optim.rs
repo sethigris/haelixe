@@ -65,7 +65,7 @@ impl AdamW {
 
                 GpuContext::adamw_step_gpu(&ctx, weight, &grad_gpu, m, v, params);
             } else {
-                panic!("CPU AdamW not implemented for this deep engineering demo!");
+                panic!("CPU AdamW not implemented for this engineering demo!");
             }
         }
     }
