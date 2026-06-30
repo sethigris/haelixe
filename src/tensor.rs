@@ -679,4 +679,72 @@ impl Tensor {
             out
         }
     }
+
+    /// Casts the tensor to a different data type.
+    /// VETERAN SYSTEMS NOTE: Casting F32 to BF16 truncates the lower 16 bits of the
+    /// mantissa. This halves the VRAM footprint and PCIe bandwidth requirements at
+    /// the cost of slight precision loss. Casting back to F32 pads the mantissa
+    /// with zeros. This method strictly operates on contiguous CPU memory to ensure
+    /// byte-level memory layout integrity before GPU upload.
+    pub fn to_dtype(&self, target_dtype: crate::DType) -> Tensor {
+        use crate::DType;
+        use half::bf16;
+
+        if self.dtype == target_dtype {
+            return self.clone();
+        }
+
+        let cpu_tensor = self.ensure_cpu();
+
+        match (cpu_tensor.dtype, target_dtype) {
+            (DType::F32, DType::BF16) => {
+                let f32_slice = unsafe { cpu_tensor.storage.as_f32_slice() };
+                let mut bf16_bytes = Vec::with_capacity(f32_slice.len() * 2);
+                for &val in f32_slice {
+                    let b = bf16::from_f32(val);
+                    bf16_bytes.extend_from_slice(&b.to_le_bytes());
+                }
+                let storage =
+                    std::sync::Arc::new(crate::storage::CpuStorage::from_bytes(&bf16_bytes));
+                Tensor {
+                    id: crate::tensor::TensorId::next(),
+                    dtype: DType::BF16,
+                    shape: cpu_tensor.shape.clone(),
+                    strides: cpu_tensor.strides.clone(),
+                    storage,
+                    byte_offset: 0,
+                    device: crate::Device::Cpu,
+                    requires_grad: cpu_tensor.requires_grad,
+                    grad: None,
+                    node: None,
+                }
+            }
+            (DType::BF16, DType::F32) => {
+                let bf16_slice = unsafe { cpu_tensor.storage.as_bf16_slice() };
+                let mut f32_bytes = Vec::with_capacity(bf16_slice.len() * 4);
+                for &val in bf16_slice {
+                    let f = val.to_f32();
+                    f32_bytes.extend_from_slice(&f.to_le_bytes());
+                }
+                let storage =
+                    std::sync::Arc::new(crate::storage::CpuStorage::from_bytes(&f32_bytes));
+                Tensor {
+                    id: crate::tensor::TensorId::next(),
+                    dtype: DType::F32,
+                    shape: cpu_tensor.shape.clone(),
+                    strides: cpu_tensor.strides.clone(),
+                    storage,
+                    byte_offset: 0,
+                    device: crate::Device::Cpu,
+                    requires_grad: cpu_tensor.requires_grad,
+                    grad: None,
+                    node: None,
+                }
+            }
+            _ => panic!(
+                "Unsupported dtype conversion: {:?} -> {:?}",
+                cpu_tensor.dtype, target_dtype
+            ),
+        }
+    }
 }

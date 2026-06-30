@@ -10,7 +10,6 @@ pub enum DType {
     BF16,
     F32,
     F64,
-    BF16,
 }
 
 impl DType {
@@ -22,7 +21,6 @@ impl DType {
             DType::F16 | DType::BF16 => 2,
             DType::U32 | DType::I32 | DType::F32 => 4,
             DType::I64 | DType::F64 => 8,
-            DType::BF16 => 2,
         }
     }
 

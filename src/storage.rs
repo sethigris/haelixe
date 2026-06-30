@@ -158,7 +158,7 @@ impl CpuStorage {
     }
 
     // ========================================================================
-    // TYPE-SAFE ACCESSORS FOR MIXED-PRECISION SUPPORT
+    // TYPE-SAFE ACCESSORS FOR MIXED-PRECISION SUPPORT (RUST 2024 COMPLIANT)
     // ========================================================================
 
     /// Returns a typed slice for F32 data.
@@ -171,16 +171,25 @@ impl CpuStorage {
     pub unsafe fn as_f32_slice(&self) -> &[f32] {
         match &self.data {
             Backing::Owned(cell) => {
-                let bytes = &*cell.get();
-                std::slice::from_raw_parts(
-                    bytes.as_ptr() as *const f32,
-                    bytes.len() / std::mem::size_of::<f32>(),
-                )
+                // VETERAN SYSTEMS NOTE (Rust 2024 Compliance):
+                // Even though this function is marked `unsafe fn`, Rust 2024 requires
+                // explicit `unsafe {}` blocks for the actual unsafe operations inside.
+                // This strictly isolates the pointer dereference and slice creation,
+                // preventing accidental Undefined Behavior if safe logic is mixed in.
+                unsafe {
+                    let bytes = &*cell.get();
+                    std::slice::from_raw_parts(
+                        bytes.as_ptr() as *const f32,
+                        bytes.len() / std::mem::size_of::<f32>(),
+                    )
+                }
             }
-            Backing::Mmap(m) => std::slice::from_raw_parts(
-                m.as_ptr() as *const f32,
-                m.len() / std::mem::size_of::<f32>(),
-            ),
+            Backing::Mmap(m) => unsafe {
+                std::slice::from_raw_parts(
+                    m.as_ptr() as *const f32,
+                    m.len() / std::mem::size_of::<f32>(),
+                )
+            },
             Backing::Gpu(_) => panic!("Cannot access GPU storage as f32 slice!"),
         }
     }
@@ -192,13 +201,13 @@ impl CpuStorage {
     /// distribute mutable access across threads.
     pub unsafe fn as_f32_slice_mut(&self) -> &mut [f32] {
         match &self.data {
-            Backing::Owned(cell) => {
+            Backing::Owned(cell) => unsafe {
                 let bytes = &mut *cell.get();
                 std::slice::from_raw_parts_mut(
                     bytes.as_mut_ptr() as *mut f32,
                     bytes.len() / std::mem::size_of::<f32>(),
                 )
-            }
+            },
             Backing::Mmap(_) => panic!("Cannot mutate memory-mapped storage!"),
             Backing::Gpu(_) => panic!("Cannot access GPU storage as mutable f32 slice!"),
         }
@@ -212,17 +221,19 @@ impl CpuStorage {
     /// the memory layout expected by GPU shaders.
     pub unsafe fn as_bf16_slice(&self) -> &[bf16] {
         match &self.data {
-            Backing::Owned(cell) => {
+            Backing::Owned(cell) => unsafe {
                 let bytes = &*cell.get();
                 std::slice::from_raw_parts(
                     bytes.as_ptr() as *const bf16,
                     bytes.len() / std::mem::size_of::<bf16>(),
                 )
-            }
-            Backing::Mmap(m) => std::slice::from_raw_parts(
-                m.as_ptr() as *const bf16,
-                m.len() / std::mem::size_of::<bf16>(),
-            ),
+            },
+            Backing::Mmap(m) => unsafe {
+                std::slice::from_raw_parts(
+                    m.as_ptr() as *const bf16,
+                    m.len() / std::mem::size_of::<bf16>(),
+                )
+            },
             Backing::Gpu(_) => panic!("Cannot access GPU storage as bf16 slice!"),
         }
     }
@@ -230,13 +241,13 @@ impl CpuStorage {
     /// Returns a typed mutable slice for BF16 data.
     pub unsafe fn as_bf16_slice_mut(&self) -> &mut [bf16] {
         match &self.data {
-            Backing::Owned(cell) => {
+            Backing::Owned(cell) => unsafe {
                 let bytes = &mut *cell.get();
                 std::slice::from_raw_parts_mut(
                     bytes.as_mut_ptr() as *mut bf16,
                     bytes.len() / std::mem::size_of::<bf16>(),
                 )
-            }
+            },
             Backing::Mmap(_) => panic!("Cannot mutate memory-mapped storage!"),
             Backing::Gpu(_) => panic!("Cannot access GPU storage as mutable bf16 slice!"),
         }
