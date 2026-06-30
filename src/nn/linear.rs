@@ -84,4 +84,9 @@ impl Linear {
             out.add(&self.bias)
         }
     }
+
+    pub fn to(&mut self, device: crate::Device) {
+        self.weight = self.weight.to(device.clone());
+        self.bias = self.bias.to(device.clone());
+    }
 }

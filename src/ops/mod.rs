@@ -5,6 +5,7 @@ pub mod flash_attention;
 pub mod layer_norm;
 pub mod linear_fused;
 pub mod matmul;
+pub mod mse_loss;
 pub mod relu;
 pub mod rope;
 pub mod scalar_mul;

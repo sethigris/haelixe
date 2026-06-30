@@ -650,4 +650,21 @@ impl Tensor {
             out
         }
     }
+
+    /// Computes the Mean Squared Error between this tensor and a target tensor.
+    pub fn mse_loss(&self, target: &Tensor) -> Tensor {
+        let loss_val = crate::kernels::mse_loss_forward(self, target);
+        let loss_tensor =
+            Tensor::from_slice(crate::DType::F32, crate::Shape::new([1]), &[loss_val]);
+
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::mse_loss::MSELossOp {
+                pred: self.clone(),
+                target: target.clone(),
+            });
+            loss_tensor.with_node(op, vec![self.clone(), target.clone()])
+        } else {
+            loss_tensor
+        }
+    }
 }

@@ -20,4 +20,9 @@ impl FeedForward {
         let h = h.relu();
         self.linear2.forward(&h)
     }
+
+    pub fn to(&mut self, device: crate::Device) {
+        self.linear1.to(device.clone());
+        self.linear2.to(device.clone());
+    }
 }

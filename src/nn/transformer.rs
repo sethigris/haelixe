@@ -32,4 +32,11 @@ impl TransformerBlock {
 
         x
     }
+
+    pub fn to(&mut self, device: crate::Device) {
+        self.norm1.to(device.clone());
+        self.mha.to(device.clone());
+        self.norm2.to(device.clone());
+        self.mlp.to(device.clone());
+    }
 }

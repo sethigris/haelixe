@@ -83,4 +83,12 @@ impl MultiHeadAttention {
         // 7. Final output projection
         self.out_proj.forward(&out)
     }
+
+    pub fn to(&mut self, device: crate::Device) {
+        self.norm.to(device.clone());
+        self.q_proj.to(device.clone());
+        self.k_proj.to(device.clone());
+        self.v_proj.to(device.clone());
+        self.out_proj.to(device.clone());
+    }
 }

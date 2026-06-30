@@ -9,6 +9,8 @@ pub mod matmul;
 pub mod reduce;
 pub mod rope;
 pub use rope::{rope_backward, rope_forward};
+pub mod loss;
+pub use loss::{mse_loss_backward, mse_loss_forward};
 
 pub use activations::{relu, relu_backward, scalar_mul, softmax, softmax_backward};
 pub use binary::add;
