@@ -23,14 +23,14 @@ esac
 
 RELEASE_URL="https://github.com/${REPO}/releases/latest/download/axiom-${PLATFORM}-${ARCH}.tar.gz"
 
-echo "⬇Downloading latest Axiom binary for ${PLATFORM}-${ARCH}..."
+echo "Downloading latest Axiom binary for ${PLATFORM}-${ARCH}..."
 TMP_DIR=$(mktemp -d)
-curl -fsSL "$RELEASE_URL" -o "${TMP_DIR}/axiom.tar.gz" || { echo "❌ Failed to download binary. Did the GitHub Action finish?"; exit 1; }
+curl -fsSL "$RELEASE_URL" -o "${TMP_DIR}/axiom.tar.gz" || { echo "Failed to download binary. Did the GitHub Action finish?"; exit 1; }
 
 echo "Extracting..."
 tar -xzf "${TMP_DIR}/axiom.tar.gz" -C "${TMP_DIR}"
 
-echo "🛠️  Installing to ${INSTALL_DIR} (requires sudo)..."
+echo "Installing to ${INSTALL_DIR} (requires sudo)..."
 sudo mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
