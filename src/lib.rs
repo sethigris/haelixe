@@ -23,5 +23,6 @@ pub use nn::Linear;
 pub use nn::MultiHeadAttention;
 pub use nn::PositionalEncoding;
 pub use nn::TransformerBlock;
+pub use nn::rms_norm::RMSNorm;
 pub use storage::CpuStorage;
 pub use tensor::{Tensor, TensorId};

@@ -14,3 +14,6 @@ pub use transformer::TransformerBlock;
 
 pub mod rope;
 pub use rope::RoPE;
+
+pub mod rms_norm;
+pub use rms_norm::RMSNorm;

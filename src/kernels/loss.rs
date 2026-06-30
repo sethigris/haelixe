@@ -1,5 +1,5 @@
+use crate::Tensor;
 use crate::kernels::activations::{SyncMutPtr, SyncPtr};
-use crate::{DType, Tensor};
 use rayon::prelude::*;
 
 /// Computes the Mean Squared Error: (1/N) * sum((pred - target)^2)

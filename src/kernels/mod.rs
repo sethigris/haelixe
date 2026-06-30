@@ -11,13 +11,16 @@ pub mod rope;
 pub use rope::{rope_backward, rope_forward};
 pub mod loss;
 pub use loss::{mse_loss_backward, mse_loss_forward};
-
-pub use activations::{relu, relu_backward, scalar_mul, softmax, softmax_backward};
+pub mod rms_norm;
+pub use activations::{
+    gelu, gelu_backward, relu, relu_backward, scalar_mul, softmax, softmax_backward,
+};
 pub use binary::add;
 pub use concat::cat_2d;
 pub use layer_norm::{layer_norm_backward, layer_norm_forward};
 pub use matmul::matmul;
 pub use reduce::{sum_all, sum_axis};
+pub use rms_norm::{rms_norm_backward, rms_norm_forward};
 
 /// A recursive helper to iterate over an N-dimensional shape,
 /// respecting arbitrary strides. This avoids allocating coordinate arrays.

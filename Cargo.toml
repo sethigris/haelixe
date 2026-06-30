@@ -12,6 +12,7 @@ memmap2 = "0.9"
 
 wgpu = "0.20"      
 pollster = "0.3"  
+rand = "0.8"
 [workspace]
 members = [
     "axiom-lab",

@@ -667,4 +667,16 @@ impl Tensor {
             loss_tensor
         }
     }
+
+    pub fn gelu(&self) -> Tensor {
+        let out = crate::kernels::gelu(self);
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::gelu::GELUOp {
+                input: self.clone(),
+            });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
 }

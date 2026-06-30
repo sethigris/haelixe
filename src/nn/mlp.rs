@@ -17,7 +17,7 @@ impl FeedForward {
     pub fn forward(&self, x: &Tensor) -> Tensor {
         let x = x.to(self.linear1.weight.device.clone());
         let h = self.linear1.forward(&x);
-        let h = h.relu();
+        let h = h.gelu();
         self.linear2.forward(&h)
     }
 

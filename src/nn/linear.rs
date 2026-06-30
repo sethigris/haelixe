@@ -1,4 +1,5 @@
-use crate::{DType, Device, GpuContext, Shape, Tensor};
+use crate::{Device, GpuContext, Shape, Tensor};
+use rand::Rng;
 use std::sync::Arc;
 
 pub struct Linear {
@@ -8,25 +9,41 @@ pub struct Linear {
 
 impl Linear {
     pub fn new(in_features: usize, out_features: usize) -> Self {
-        let bound = (1.0 / in_features as f32).sqrt();
+        let fan_in = in_features as f32;
 
+        // Kaiming Uniform Bound for Weights
+        let weight_bound = (6.0 / fan_in).sqrt();
+        // Uniform Bound for Bias
+        let bias_bound = 1.0 / fan_in.sqrt();
+
+        let mut rng = rand::thread_rng();
+
+        // Initialize Weights
         let weight_data: Vec<f32> = (0..in_features * out_features)
-            .map(|_| fastrand::f32() * 2.0 * bound - bound)
+            .map(|_| rng.gen_range(-weight_bound..weight_bound))
             .collect();
 
-        let bias_data = vec![0.0f32; out_features];
+        // Initialize Bias
+        let bias_data: Vec<f32> = (0..out_features)
+            .map(|_| rng.gen_range(-bias_bound..bias_bound))
+            .collect();
 
-        let weight = Tensor::from_slice(
-            DType::F32,
-            Shape::new([in_features, out_features]),
-            &weight_data,
-        )
-        .requires_grad_(true);
-
-        let bias = Tensor::from_slice(DType::F32, Shape::new([out_features]), &bias_data)
-            .requires_grad_(true);
-
-        Self { weight, bias }
+        Self {
+            // Explicitly flag weights as trainable so the Autograd
+            // engine registers them in the gradient map for the optimizer.
+            weight: Tensor::from_slice(
+                crate::DType::F32,
+                crate::Shape::new([in_features, out_features]),
+                &weight_data,
+            )
+            .requires_grad_(true),
+            bias: Tensor::from_slice(
+                crate::DType::F32,
+                crate::Shape::new([out_features]),
+                &bias_data,
+            )
+            .requires_grad_(true),
+        }
     }
 
     pub fn forward(&self, x: &Tensor) -> Tensor {

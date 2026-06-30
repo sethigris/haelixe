@@ -69,4 +69,13 @@ impl AdamW {
             }
         }
     }
+
+    // In high-dimensional, non-convex loss landscapes, a static learning rate
+    // prevents the optimizer from settling into sharp global minima. This method
+    // allows the external training loop to inject dynamic learning rate schedules
+    // (like Cosine Annealing or Linear Warmup) without reconstructing the optimizer
+    // state or destroying the accumulated momentum (m) and variance (v) buffers.
+    pub fn set_lr(&mut self, new_lr: f32) {
+        self.lr = new_lr;
+    }
 }

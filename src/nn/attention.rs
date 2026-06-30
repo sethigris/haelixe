@@ -1,7 +1,16 @@
-use crate::{LayerNorm, Linear, Shape, Tensor};
+use crate::nn::linear::Linear;
+use crate::nn::rms_norm::RMSNorm;
+use crate::{Shape, Tensor};
 
 pub struct MultiHeadAttention {
-    pub norm: LayerNorm,
+    // MATHEMATICAL RATIONALE (Pre-Norm Architecture):
+    // We normalize *before* the linear projections rather than after.
+    // By utilizing RMSNorm here, we eliminate the mean-centering step of standard
+    // LayerNorm. This strictly preserves the magnitude of the residual stream and
+    // prevents the catastrophic variance collapse (the 0.625 loss floor) that plagues
+    // deep networks using ReLU and standard LayerNorm.
+    pub norm: RMSNorm,
+
     pub q_proj: Linear,
     pub k_proj: Linear,
     pub v_proj: Linear,
@@ -20,7 +29,11 @@ impl MultiHeadAttention {
         let head_dim = hidden_dim / num_heads;
 
         Self {
-            norm: LayerNorm::new(hidden_dim, 1e-5),
+            // RMSNorm weights are strictly initialized to 1.0.
+            // This acts as an identity function at initialization, ensuring that
+            // the initial forward pass does not artificially scale or distort the
+            // Kaiming-initialized variance of the incoming activations.
+            norm: RMSNorm::new(hidden_dim),
             q_proj: Linear::new(hidden_dim, hidden_dim),
             k_proj: Linear::new(hidden_dim, hidden_dim),
             v_proj: Linear::new(hidden_dim, hidden_dim),

@@ -186,3 +186,52 @@ pub fn softmax_backward(dy: &Tensor, y: &Tensor) -> Tensor {
     });
     dx
 }
+
+/// GELU (Gaussian Error Linear Unit) Forward
+/// Mathematically prevents the "dying neuron" trap inherent in ReLU.
+pub fn gelu(tensor: &Tensor) -> Tensor {
+    let tensor = tensor.ensure_cpu();
+    let out = Tensor::empty(tensor.dtype, tensor.shape.clone());
+    let num_elements = tensor.shape.num_elements();
+
+    let in_ptr = SyncPtr(tensor.storage.as_ptr() as *const f32);
+    let out_ptr = SyncMutPtr(out.storage.as_mut_ptr() as *mut f32);
+
+    let c = (2.0_f32 / std::f32::consts::PI).sqrt();
+
+    (0..num_elements).into_par_iter().for_each(|i| unsafe {
+        let x = *in_ptr.get().add(i);
+        let inner = c * (x + 0.044715 * x.powi(3));
+        let tanh_val = inner.tanh();
+        *out_ptr.get().add(i) = 0.5 * x * (1.0 + tanh_val);
+    });
+    out
+}
+
+/// GELU Backward (Exact analytical derivative)
+pub fn gelu_backward(grad_output: &Tensor, input: &Tensor) -> Tensor {
+    let grad_output = grad_output.ensure_cpu();
+    let input = input.ensure_cpu();
+    let out = Tensor::empty(grad_output.dtype, grad_output.shape.clone());
+    let num_elements = grad_output.shape.num_elements();
+
+    let g_ptr = SyncPtr(grad_output.storage.as_ptr() as *const f32);
+    let in_ptr = SyncPtr(input.storage.as_ptr() as *const f32);
+    let out_ptr = SyncMutPtr(out.storage.as_mut_ptr() as *mut f32);
+
+    let c = (2.0_f32 / std::f32::consts::PI).sqrt();
+
+    (0..num_elements).into_par_iter().for_each(|i| unsafe {
+        let g = *g_ptr.get().add(i);
+        let x = *in_ptr.get().add(i);
+
+        let inner = c * (x + 0.044715 * x.powi(3));
+        let tanh_val = inner.tanh();
+        let sech2 = 1.0 - tanh_val.powi(2);
+        let d_inner = c * (1.0 + 3.0 * 0.044715 * x.powi(2));
+
+        let dx = 0.5 * (1.0 + tanh_val) + 0.5 * x * sech2 * d_inner;
+        *out_ptr.get().add(i) = g * dx;
+    });
+    out
+}
