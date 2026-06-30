@@ -3,7 +3,7 @@
 ![Axiom Logo](/logo-removebg-preview.png)
 
 
-**A bare-metal, tiny deep learning engine in Rust with cross-platform GPU acceleration.**
+**A bare-metal, experimental deep learning engine in Rust with cross-platform GPU acceleration.**
 
 Axiom is a high-performance, educational deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Axiom leverages pure Rust for its core CPU compute engine and uses the `wgpu` crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
 
@@ -119,6 +119,3 @@ fn main() {
     }
 }
 ```
-
-## License
-This project is open-source and built for educational and systems-programming exploration.
