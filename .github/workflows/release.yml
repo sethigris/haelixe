@@ -3,7 +3,11 @@ name: Build and Release Axiom
 on:
   push:
     tags:
-      - 'v*' # Triggers when you push a tag like v1.0.0
+      - 'v*'
+
+# CRITICAL FIX: Grant the GITHUB_TOKEN permission to create releases
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -36,8 +40,7 @@ jobs:
           tar -czvf ${{ matrix.asset_name }} axiom
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v1
+        # Upgraded to v2 for full Node 24 compatibility
+        uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.asset_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
