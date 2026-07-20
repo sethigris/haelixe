@@ -1,5 +1,20 @@
-use crate::{DType, Device, Shape, Tensor};
-use std::sync::Arc;
+// --------------------------------------------------------------------------
+// Module: nn::rms_norm
+// --------------------------------------------------------------------------
+//
+// PURPOSE:
+//   Implements Root Mean Square Layer Normalization (RMSNorm).
+//   Unlike standard LayerNorm, RMSNorm omits the mean-centering step,
+//   which empirically yields identical convergence properties in
+//   Transformers while saving significant compute and memory bandwidth.
+//
+// AUTHORSHIP:
+//   Engineered by Sethigris and the Haelixe core team.
+//   Date: 2026-07-20
+// --------------------------------------------------------------------------
+
+use crate::{Tensor, DType, Shape};
+use super::Module;
 
 pub struct RMSNorm {
     pub weight: Tensor,
@@ -8,32 +23,35 @@ pub struct RMSNorm {
 
 impl RMSNorm {
     pub fn new(hidden_dim: usize) -> Self {
-        let weight_data = vec![1.0f32; hidden_dim];
-        Self {
-            // Explicitly flag the scaling factor as trainable.
-            weight: Tensor::from_slice(DType::F32, Shape::new([hidden_dim]), &weight_data)
-                .requires_grad_(true),
-            eps: 1e-5,
-        }
+        let ones = vec![1.0f32; hidden_dim];
+        let mut weight = Tensor::from_slice(
+            DType::F32, 
+            Shape::new([hidden_dim]), 
+            &ones
+        );
+        weight.requires_grad = true;
+        
+        Self { weight, eps: 1e-5 }
     }
+}
 
-    pub fn to(&mut self, device: Device) {
-        self.weight = self.weight.to(device);
-    }
-
-    pub fn forward(&self, x: &Tensor) -> Tensor {
-        let x_sync = x.to(self.weight.device.clone());
-        let out = crate::kernels::rms_norm_forward(&x_sync, &self.weight, self.eps);
-
-        if x_sync.requires_grad {
-            let op = Arc::new(crate::ops::rms_norm::RMSNormOp {
-                x: x_sync.clone(),
+impl Module for RMSNorm {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        let out = crate::kernels::rms_norm::rms_norm_forward(x, &self.weight, self.eps);
+        
+        if x.requires_grad || self.weight.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::rms_norm::RMSNormOp {
+                x: x.clone(),
                 weight: self.weight.clone(),
                 eps: self.eps,
             });
-            out.with_node(op, vec![x_sync, self.weight.clone()])
+            out.with_node(op, vec![x.clone(), self.weight.clone()])
         } else {
             out
         }
+    }
+    
+    fn parameters(&self) -> Vec<&Tensor> {
+        vec![&self.weight]
     }
 }
