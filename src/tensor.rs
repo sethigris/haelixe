@@ -806,4 +806,87 @@ impl Tensor {
         t.requires_grad = false;
         t
     }
+
+    pub fn binary_broadcast(&self, other: &Tensor, op_code: u32) -> Tensor {
+        let (out_shape, sa, sb) =
+            crate::kernels::broadcast::compute_broadcast(self.shape.dims(), other.shape.dims())
+                .expect("Incompatible shapes for broadcasting");
+
+        let out = if self.device.is_gpu() && other.device.is_gpu() {
+            let ctx = match &self.device {
+                crate::Device::Gpu(c) => c.clone(),
+                _ => unreachable!(),
+            };
+            crate::gpu::GpuContext::binary_broadcast_gpu(
+                &ctx, self, other, op_code, &out_shape, &sa, &sb,
+            )
+        } else {
+            crate::kernels::broadcast::forward_cpu(self, other, op_code, &out_shape, &sa, &sb)
+        };
+
+        if self.requires_grad || other.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::binary_broadcast::BinaryBroadcastOp {
+                a: self.clone(),
+                b: other.clone(),
+                op_code,
+                out_shape,
+                strides_a: sa,
+                strides_b: sb,
+            });
+            out.with_node(op, vec![self.clone(), other.clone()])
+        } else {
+            out
+        }
+    }
+}
+
+impl std::ops::Add for &Tensor {
+    type Output = Tensor;
+    fn add(self, rhs: Self) -> Tensor {
+        self.binary_broadcast(rhs, 0)
+    }
+}
+impl std::ops::Mul for &Tensor {
+    type Output = Tensor;
+    fn mul(self, rhs: Self) -> Tensor {
+        self.binary_broadcast(rhs, 1)
+    }
+}
+impl std::ops::Sub for &Tensor {
+    type Output = Tensor;
+    fn sub(self, rhs: Self) -> Tensor {
+        self.binary_broadcast(rhs, 2)
+    }
+}
+impl std::ops::Div for &Tensor {
+    type Output = Tensor;
+    fn div(self, rhs: Self) -> Tensor {
+        self.binary_broadcast(rhs, 3)
+    }
+}
+
+// Allow mixing owned and referenced tensors
+impl std::ops::Add<Tensor> for Tensor {
+    type Output = Tensor;
+    fn add(self, rhs: Tensor) -> Tensor {
+        (&self).binary_broadcast(&rhs, 0)
+    }
+}
+impl std::ops::Mul<Tensor> for Tensor {
+    type Output = Tensor;
+    fn mul(self, rhs: Tensor) -> Tensor {
+        (&self).binary_broadcast(&rhs, 1)
+    }
+}
+impl std::ops::Sub<Tensor> for Tensor {
+    type Output = Tensor;
+    fn sub(self, rhs: Tensor) -> Tensor {
+        (&self).binary_broadcast(&rhs, 2)
+    }
+}
+impl std::ops::Div<Tensor> for Tensor {
+    type Output = Tensor;
+    fn div(self, rhs: Tensor) -> Tensor {
+        (&self).binary_broadcast(&rhs, 3)
+    }
 }

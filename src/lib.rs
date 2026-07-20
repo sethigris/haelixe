@@ -11,6 +11,7 @@ pub mod optim;
 pub mod storage;
 pub mod tensor;
 
+pub use autograd::NoGradGuard;
 pub use autograd::{Node, Op};
 pub use data::{DataLoader, MmapDataset};
 pub use device::Device;
@@ -20,4 +21,3 @@ pub use layout::{Shape, Strides};
 pub use nn::{Linear, Module, RMSNorm};
 pub use storage::CpuStorage;
 pub use tensor::{Tensor, TensorId};
-pub use autograd::NoGradGuard;

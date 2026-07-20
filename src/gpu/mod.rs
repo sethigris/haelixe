@@ -24,6 +24,8 @@ pub struct GpuContext {
     adamw_bind_group_layout: wgpu::BindGroupLayout,
     flash_attn_pipeline: wgpu::ComputePipeline,
     flash_attn_bind_group_layout: wgpu::BindGroupLayout,
+    pub binary_broadcast_pipeline: wgpu::ComputePipeline,
+    pub binary_broadcast_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
@@ -548,6 +550,73 @@ impl GpuContext {
                 compilation_options: Default::default(),
             });
 
+        let bb_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bb_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/binary_broadcast.wgsl").into()),
+        });
+
+        let binary_broadcast_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bb_bg_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let bb_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bb_pipeline_layout"),
+            bind_group_layouts: &[&binary_broadcast_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let binary_broadcast_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("bb_pipeline"),
+                layout: Some(&bb_pipeline_layout),
+                module: &bb_shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            });
+
         Arc::new(Self {
             device,
             queue,
@@ -566,6 +635,8 @@ impl GpuContext {
             adamw_pipeline: adamw_pipeline,
             flash_attn_pipeline,
             flash_attn_bind_group_layout,
+            binary_broadcast_pipeline,
+            binary_broadcast_bind_group_layout,
         })
     }
 
@@ -1228,6 +1299,149 @@ impl GpuContext {
             grad: None,
             node: None,
         }
+    }
+
+    pub fn binary_broadcast_gpu(
+        ctx: &Arc<GpuContext>,
+        a: &Tensor,
+        b: &Tensor,
+        op_code: u32,
+        out_shape: &[usize],
+        sa: &[usize],
+        sb: &[usize],
+    ) -> Tensor {
+        let total: usize = out_shape.iter().product();
+        let out_bytes = total * std::mem::size_of::<f32>();
+        let a_alloc = a.storage.get_gpu_allocation().unwrap();
+        let b_alloc = b.storage.get_gpu_allocation().unwrap();
+        let out_alloc = ctx.arena.allocate(&ctx.device, out_bytes as u64);
+
+        // Helper to calculate contiguous strides directly from shape
+        fn get_strides(shape: &[usize]) -> Vec<usize> {
+            let mut strides = vec![0; shape.len()];
+            if shape.is_empty() {
+                return strides;
+            }
+            let mut acc = 1;
+            for i in (0..shape.len()).rev() {
+                strides[i] = acc;
+                acc *= shape[i];
+            }
+            strides
+        }
+
+        // Pack metadata into WGSL Uniform Buffer (Strict 16-byte alignment)
+        let os = get_strides(out_shape);
+        let mut meta: [u32; 32] = [0; 32];
+
+        // Pad shapes/strides to 6D for WGSL
+        let mut os_padded = vec![0; 6];
+        let mut shape_padded = vec![1; 6];
+        let mut sa_padded = vec![0; 6];
+        let mut sb_padded = vec![0; 6];
+
+        let offset = 6 - out_shape.len();
+        for i in 0..out_shape.len() {
+            shape_padded[offset + i] = out_shape[i];
+            os_padded[offset + i] = os[i] as u32;
+            sa_padded[offset + i] = sa[i] as u32;
+            sb_padded[offset + i] = sb[i] as u32;
+        }
+
+        meta[0..4].copy_from_slice(&os_padded[0..4]);
+        meta[4..6].copy_from_slice(&os_padded[4..6]);
+
+        meta[6..10].copy_from_slice(&[
+            shape_padded[0] as u32,
+            shape_padded[1] as u32,
+            shape_padded[2] as u32,
+            shape_padded[3] as u32,
+        ]);
+        meta[10..12].copy_from_slice(&[shape_padded[4] as u32, shape_padded[5] as u32]);
+
+        meta[12..16].copy_from_slice(&sa_padded[0..4]);
+        meta[16..18].copy_from_slice(&sa_padded[4..6]);
+        meta[18..22].copy_from_slice(&sb_padded[0..4]);
+        meta[22..24].copy_from_slice(&sb_padded[4..6]);
+
+        meta[24] = total as u32;
+        meta[25] = op_code;
+
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bb_params"),
+                contents: bytemuck::cast_slice(&meta),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bb_bg"),
+            layout: &ctx.binary_broadcast_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&ctx.binary_broadcast_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(((total + 255) / 256) as u32, 1, 1);
+        }
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        Tensor {
+            id: crate::TensorId::next(),
+            dtype: crate::DType::F32,
+            shape: crate::Shape::new(out_shape.to_vec()),
+            strides: crate::Shape::new(out_shape.to_vec()).contiguous_strides(),
+            storage: std::sync::Arc::new(crate::storage::CpuStorage::from_gpu_allocation(
+                out_alloc,
+            )),
+            byte_offset: 0,
+            device: crate::Device::Gpu(ctx.clone()),
+            requires_grad: false,
+            grad: None,
+            node: None,
+        }
+    }
+
+    // Helper to ensure 6D padding for WGSL
+    fn out_strides(shape: &[usize]) -> Vec<usize> {
+        let mut s = vec![0; shape.len()];
+        if !shape.is_empty() {
+            let mut acc = 1;
+            for i in (0..shape.len()).rev() {
+                s[i] = acc;
+                acc *= shape[i];
+            }
+        }
+        while s.len() < 6 {
+            s.insert(0, 0);
+        } // Pad left for WGSL uniform buffer
+        s
     }
 }
 
