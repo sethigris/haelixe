@@ -3,7 +3,7 @@
 ![Haelixe Logo](/logo-removebg-preview.png)
 
 
-AXIOM: A BARE-METAL DEEP LEARNING ENGINE IN RUST
+HAELIXE: A BARE-METAL DEEP LEARNING ENGINE IN RUST
 
 Haelixe is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Haelixe leverages pure Rust for its core CPU compute engine and uses the wgpu crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
 
@@ -70,7 +70,7 @@ tensor.rs - The core Tensor struct and API
 haelixe-lab/ - Downstream consumer workspace for API ergonomics and mathematical convergence testing
 ````
 
-THE AXIOM LAB: DOWNSTREAM CONSUMER TESTING
+THE HAELIXE LAB: DOWNSTREAM CONSUMER TESTING
 
 Haelixe utilizes a Cargo Workspace monorepo architecture. The haelixe-lab directory serves as a downstream consumer project that imports the core Haelixe library via a local path dependency. This ensures atomic API evolution, tests public API ergonomics, and serves as the definitive mathematical convergence testbed (e.g., Sequence Denoising with Cosine Annealing).
 

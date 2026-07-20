@@ -5,4 +5,4 @@ edition = "2024"
 
 
 [dependencies]
-haelixe = { path = ".." }
+haelixe = { path = "/home/sethigris/haelixe" }
