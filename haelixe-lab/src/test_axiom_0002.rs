@@ -1,7 +1,7 @@
-use axiom::{DType, Shape, Tensor};
+use haelixe::{DType, Shape, Tensor};
 
 fn main() {
-    println!("Axiom Systems Test: BF16 Roundtrip Integrity");
+    println!("Haelixe Systems Test: BF16 Roundtrip Integrity");
     println!("--------------------------------------------");
 
     // 1. Generate a high-variance F32 tensor

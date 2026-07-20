@@ -33,27 +33,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "axiom"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "fastrand",
- "half",
- "memmap2",
- "pollster",
- "rand",
- "rayon",
- "wgpu",
-]
-
-[[package]]
-name = "axiom-lab"
-version = "0.1.0"
-dependencies = [
- "axiom",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -411,6 +390,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.13.0",
+]
+
+[[package]]
+name = "haelixe"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "fastrand",
+ "half",
+ "memmap2",
+ "pollster",
+ "rand",
+ "rayon",
+ "wgpu",
+]
+
+[[package]]
+name = "haelixe-lab"
+version = "0.1.0"
+dependencies = [
+ "haelixe",
 ]
 
 [[package]]

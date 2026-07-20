@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
-REPO="sethigris/axiom"
+REPO="sethigris/haelixe"
 INSTALL_DIR="/usr/local/bin"
-BINARY_NAME="axiom"
+BINARY_NAME="haelixe"
 
-echo "Axiom Deep Learning Engine Installer"
+echo "Haelixe Deep Learning Engine Installer"
 echo "---------------------------------------"
 
 OS="$(uname -s)"
@@ -23,7 +23,7 @@ esac
 
 RELEASE_URL="https://github.com/${REPO}/releases/latest/download/axiom-${PLATFORM}-${ARCH}.tar.gz"
 
-echo "Downloading latest Axiom binary for ${PLATFORM}-${ARCH}..."
+echo "Downloading latest Haelixe binary for ${PLATFORM}-${ARCH}..."
 TMP_DIR=$(mktemp -d)
 curl -fsSL "$RELEASE_URL" -o "${TMP_DIR}/axiom.tar.gz" || { echo "Failed to download binary. Did the GitHub Action finish?"; exit 1; }
 
@@ -37,5 +37,5 @@ sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 rm -rf "${TMP_DIR}"
 
 echo ""
-echo "Axiom successfully installed!"
+echo "Haelixe successfully installed!"
 echo "Run 'axiom' anywhere in your terminal to get started."

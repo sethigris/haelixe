@@ -1,4 +1,4 @@
-name: Build and Release Axiom
+name: Build and Release Haelixe
 
 on:
   push:
@@ -18,10 +18,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            asset_name: axiom-linux-x86_64.tar.gz
+            asset_name: haelixe-linux-x86_64.tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset_name: axiom-macos-aarch64.tar.gz
+            asset_name: haelixe-macos-aarch64.tar.gz
 
     steps:
       - uses: actions/checkout@v4

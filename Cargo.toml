@@ -1,5 +1,5 @@
 [package]
-name = "axiom"
+name = "haelixe"
 version = "0.1.0"
 edition = "2024"
 
@@ -15,5 +15,5 @@ pollster = "0.3"
 rand = "0.8"
 [workspace]
 members = [
-    "axiom-lab",
+    "haelixe-lab",
 ]

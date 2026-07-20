@@ -1,11 +1,11 @@
-![Axiom Logo](/axiom.png)
+![Haelixe Logo](/haelixe.png)
 
-![Axiom Logo](/logo-removebg-preview.png)
+![Haelixe Logo](/logo-removebg-preview.png)
 
 
 AXIOM: A BARE-METAL DEEP LEARNING ENGINE IN RUST
 
-Axiom is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Axiom leverages pure Rust for its core CPU compute engine and uses the wgpu crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
+Haelixe is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Haelixe leverages pure Rust for its core CPU compute engine and uses the wgpu crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
 
 It features a dynamic computation graph (Autograd), modern LLM architectural primitives, a deterministic memory allocator, and a mixed-precision foundation.
 
@@ -13,7 +13,7 @@ It features a dynamic computation graph (Autograd), modern LLM architectural pri
 CORE ARCHITECTURE AND MODERN LLM PRIMITIVES
 
 1. Modern Transformer Primitives
-Axiom implements the exact mathematical foundations used by state-of-the-art architectures like LLaMA 3 and Mistral:
+Haelixe implements the exact mathematical foundations used by state-of-the-art architectures like LLaMA 3 and Mistral:
 • Rotary Position Embeddings (RoPE): Replaces legacy absolute positional encodings with sequence-dependent orthogonal rotations for mathematically pure relative distance awareness.
 • RMSNorm: Eliminates the mean-subtraction step of standard LayerNorm to prevent catastrophic variance collapse in deep networks.
 • GELU Activations: Replaces brittle ReLU networks with smooth, non-linear Gaussian Error Linear Units to prevent dying neurons.
@@ -49,7 +49,7 @@ SYSTEMS-LEVEL HARDWARE ENGINEERING
 • Thread-Safe Pointers: Custom SyncPtr wrappers safely bypass Rust's strict concurrency rules for raw pointers.
 
 4. Out-of-Core Data Loading
-• Memory-Mapped Datasets: Using memmap2, Axiom maps binary dataset files directly into virtual memory, allowing training on datasets larger than system RAM.
+• Memory-Mapped Datasets: Using memmap2, Haelixe maps binary dataset files directly into virtual memory, allowing training on datasets larger than system RAM.
 
 
 PROJECT STRUCTURE
@@ -67,12 +67,12 @@ ops/ - Autograd operations (Forward/Backward pass logic)
 optim.rs - Optimizers (AdamW with Cosine Annealing and GPU/CPU dispatch)
 storage.rs - UnsafeCell, physical memory backings, and mixed-precision slice accessors
 tensor.rs - The core Tensor struct and API
-axiom-lab/ - Downstream consumer workspace for API ergonomics and mathematical convergence testing
+haelixe-lab/ - Downstream consumer workspace for API ergonomics and mathematical convergence testing
 ````
 
 THE AXIOM LAB: DOWNSTREAM CONSUMER TESTING
 
-Axiom utilizes a Cargo Workspace monorepo architecture. The axiom-lab directory serves as a downstream consumer project that imports the core Axiom library via a local path dependency. This ensures atomic API evolution, tests public API ergonomics, and serves as the definitive mathematical convergence testbed (e.g., Sequence Denoising with Cosine Annealing).
+Haelixe utilizes a Cargo Workspace monorepo architecture. The haelixe-lab directory serves as a downstream consumer project that imports the core Haelixe library via a local path dependency. This ensures atomic API evolution, tests public API ergonomics, and serves as the definitive mathematical convergence testbed (e.g., Sequence Denoising with Cosine Annealing).
 
 
 GETTING STARTED
@@ -84,18 +84,18 @@ Prerequisites:
 Running the Engine:
 Clone the repository and run the downstream lab to verify mathematical convergence and hardware integration.
 ````
-git clone https://github.com/sethigris/axiom.git
-cd axiom
-cargo run -p axiom-lab --release
+git clone https://github.com/sethigris/haelixe.git
+cd haelixe
+cargo run -p haelixe-lab --release
 ````
 
 
 EXAMPLE: SEQUENCE DENOISING WITH MODERN PRIMITIVES
 
-Below is the reference implementation used in axiom-lab to validate the framework. It trains a Transformer block utilizing RoPE, RMSNorm, GELU, and Cosine Annealing to map a noisy multi-frequency sine wave back to its clean mathematical signal.
+Below is the reference implementation used in haelixe-lab to validate the framework. It trains a Transformer block utilizing RoPE, RMSNorm, GELU, and Cosine Annealing to map a noisy multi-frequency sine wave back to its clean mathematical signal.
 
 ```rust
-use axiom::{DType, Device, Shape, Tensor, TransformerBlock, RMSNorm, optim::AdamW};
+use haelixe::{DType, Device, Shape, Tensor, TransformerBlock, RMSNorm, optim::AdamW};
 use std::f32::consts::PI;
 
 fn main() {
@@ -105,10 +105,10 @@ fn main() {
     let hidden_dim = 64;
     let num_heads = 4;
 
-    let mut embed = axiom::Linear::new(1, hidden_dim);
+    let mut embed = haelixe::Linear::new(1, hidden_dim);
     let mut block = TransformerBlock::new(hidden_dim, num_heads);
     let mut final_norm = RMSNorm::new(hidden_dim);
-    let mut head = axiom::Linear::new(hidden_dim, 1);
+    let mut head = haelixe::Linear::new(hidden_dim, 1);
 
     embed.to(gpu.clone());
     block.to(gpu.clone());
