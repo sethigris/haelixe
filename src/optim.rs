@@ -50,9 +50,9 @@
 //   Date: 2026-07-20
 // --------------------------------------------------------------------------
 
-use std::collections::HashMap;
-use crate::{Tensor, TensorId, DType};
+use crate::{DType, Tensor, TensorId};
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 /// The mathematical contract for any optimization algorithm in Haelixe.
 ///
@@ -146,12 +146,8 @@ impl Optimizer for AdamW {
             // Lazily allocate the moment buffers on first encounter.
             if !self.state.contains_key(&param.id) {
                 let zeros = vec![0.0f32; n];
-                let m = Tensor::from_slice(
-                    DType::F32, p_cpu.shape.clone(), &zeros
-                );
-                let v = Tensor::from_slice(
-                    DType::F32, p_cpu.shape.clone(), &zeros
-                );
+                let m = Tensor::from_slice(DType::F32, p_cpu.shape.clone(), &zeros);
+                let v = Tensor::from_slice(DType::F32, p_cpu.shape.clone(), &zeros);
                 self.state.insert(param.id, (m, v));
             }
 

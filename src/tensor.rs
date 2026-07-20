@@ -797,4 +797,13 @@ impl Tensor {
 
         loss_tensor
     }
+
+    /// Returns a new tensor detached from the current graph.
+    /// It shares the same underlying storage but will not track gradients.
+    pub fn detach(&self) -> Tensor {
+        let mut t = self.clone();
+        t.node = None;
+        t.requires_grad = false;
+        t
+    }
 }

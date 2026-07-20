@@ -17,6 +17,7 @@ pub use device::Device;
 pub use dtype::DType;
 pub use gpu::GpuContext;
 pub use layout::{Shape, Strides};
+pub use nn::{Linear, Module, RMSNorm};
 pub use storage::CpuStorage;
 pub use tensor::{Tensor, TensorId};
-pub use nn::{Module, Linear, RMSNorm};
+pub use autograd::NoGradGuard;

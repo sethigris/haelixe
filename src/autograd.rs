@@ -1,6 +1,56 @@
 use crate::{Tensor, TensorId};
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::sync::Arc;
+
+// --------------------------------------------------------------------------
+// MODULE: autograd (State Management Additions)
+// --------------------------------------------------------------------------
+//
+// PURPOSE:
+//   Provides global state management for gradient tracking.
+//   Introduces the `NoGradGuard` RAII pattern to temporarily disable
+//   the construction of the computational graph during inference or
+//   validation phases, preventing catastrophic VRAM/RAM leaks.
+//
+// STATE TRANSITION DIAGRAM:
+//   [Grad Enabled] --(NoGradGuard::new)--> [Grad Disabled]
+//   [Grad Disabled] --(Guard Dropped)--> [Grad Enabled]
+// --------------------------------------------------------------------------
+
+thread_local! {
+    static GRAD_ENABLED: Cell<bool> = Cell::new(true);
+}
+
+/// Returns true if gradient tracking is currently enabled.
+pub fn is_grad_enabled() -> bool {
+    GRAD_ENABLED.with(|c| c.get())
+}
+
+/// Sets the global gradient state.
+pub fn set_grad_enabled(enabled: bool) {
+    GRAD_ENABLED.with(|c| c.set(enabled));
+}
+
+/// A RAII guard that disables gradient tracking for the current scope.
+/// When dropped, it restores the previous state, allowing safe nesting.
+pub struct NoGradGuard {
+    prev: bool,
+}
+
+impl NoGradGuard {
+    pub fn new() -> Self {
+        let prev = is_grad_enabled();
+        set_grad_enabled(false);
+        Self { prev }
+    }
+}
+
+impl Drop for NoGradGuard {
+    fn drop(&mut self) {
+        set_grad_enabled(self.prev);
+    }
+}
 
 /// The core trait for all neural network operations.
 /// Added `std::fmt::Debug` so the Node can derive Debug.
@@ -18,11 +68,14 @@ pub struct Node {
     pub parents: Vec<Tensor>,
 }
 
-// ... (rest of the file remains exactly the same) ...
-
 impl Tensor {
     /// Attaches a computation node to this tensor, marking it as part of the Autograd graph.
     pub fn with_node(mut self, op: Arc<dyn Op>, parents: Vec<Tensor>) -> Self {
+        // Bypass graph construction if globally disabled
+        if !is_grad_enabled() {
+            return self;
+        }
+
         self.node = Some(Arc::new(Node { op, parents }));
         self.requires_grad = true; // If it's an output of an Op, it requires grad
         self

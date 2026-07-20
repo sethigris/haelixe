@@ -8,11 +8,16 @@ pub struct RMSNormOp {
 }
 
 impl Op for RMSNormOp {
-    fn name(&self) -> &'static str { "RMSNorm" }
+    fn name(&self) -> &'static str {
+        "RMSNorm"
+    }
 
     fn backward(&self, grad_output: &Tensor) -> Vec<Option<Tensor>> {
         let (dx, dw) = crate::kernels::rms_norm::rms_norm_backward(
-            grad_output, &self.x, &self.weight, self.eps
+            grad_output,
+            &self.x,
+            &self.weight,
+            self.eps,
         );
         vec![Some(dx), Some(dw)]
     }
