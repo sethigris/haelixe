@@ -6,3 +6,4 @@ edition = "2024"
 
 [dependencies]
 haelixe = { path = "/home/sethigris/haelixe" }
+rand = "0.8"

@@ -1,5 +1,5 @@
-use crate::{Tensor, DType};
 use crate::autograd::Op;
+use crate::{DType, Tensor};
 
 #[derive(Debug)]
 pub struct CrossEntropyLoss {
@@ -18,10 +18,10 @@ impl Op for CrossEntropyLoss {
     fn backward(&self, _grad_output: &Tensor) -> Vec<Option<Tensor>> {
         // 1. Compute the raw gradients (Softmax - OneHot)
         let grads = crate::kernels::loss::cross_entropy_backward(
-            &self.softmax_probs, 
-            &self.targets, 
-            self.batch_size, 
-            self.num_classes
+            &self.softmax_probs,
+            &self.targets,
+            self.batch_size,
+            self.num_classes,
         );
 
         // INTERCEPT: Print the gradients directly from the engine core
@@ -30,17 +30,19 @@ impl Op for CrossEntropyLoss {
         for i in 0..self.batch_size {
             let start = i * self.num_classes;
             let _end = start + self.num_classes;
-            println!("Sample {} (Target={}): [{:.4}, {:.4}, {:.4}]", 
-                i, self.targets[i], grads[start], grads[start+1], grads[start+2]);
+            println!(
+                "Sample {} (Target={}): [{:.4}, {:.4}, {:.4}]",
+                i,
+                self.targets[i],
+                grads[start],
+                grads[start + 1],
+                grads[start + 2]
+            );
         }
 
         // 2. Wrap in a Tensor to pass back down the graph
-        let grad_tensor = Tensor::from_slice(
-            DType::F32, 
-            self.logits.shape.clone(), 
-            &grads
-        );
+        let grad_tensor = Tensor::from_slice(DType::F32, self.logits.shape.clone(), &grads);
 
-        vec![Some(grad_tensor), None] 
+        vec![Some(grad_tensor), None]
     }
 }

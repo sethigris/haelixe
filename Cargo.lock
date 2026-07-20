@@ -411,6 +411,7 @@ name = "haelixe-lab"
 version = "0.1.0"
 dependencies = [
  "haelixe",
+ "rand",
 ]
 
 [[package]]
