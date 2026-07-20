@@ -1,6 +1,7 @@
 pub mod add;
 pub mod cat;
 pub mod contiguous;
+pub mod cross_entropy;
 pub mod flash_attention;
 pub mod gelu;
 pub mod layer_norm;

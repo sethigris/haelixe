@@ -747,4 +747,54 @@ impl Tensor {
             ),
         }
     }
+
+    /// Computes Cross-Entropy Loss against a batch of target class indices.
+    pub fn cross_entropy(&self, targets: &[u32]) -> Tensor {
+        let shape = self.shape.dims();
+        assert!(
+            shape.len() == 2,
+            "CrossEntropy expects 2D logits: [Batch, Classes]"
+        );
+
+        let batch_size = shape[0];
+        let num_classes = shape[1];
+        assert_eq!(
+            targets.len(),
+            batch_size,
+            "Targets length must match batch size"
+        );
+
+        let logits_cpu = self.ensure_cpu();
+        let logits_f32 = unsafe {
+            std::slice::from_raw_parts(
+                logits_cpu.storage.as_ptr() as *const f32,
+                logits_cpu.storage.len() / 4,
+            )
+        };
+
+        // Run Forward Kernel
+        let (loss_val, softmax_probs) = crate::kernels::loss::cross_entropy_forward(
+            logits_f32,
+            targets,
+            batch_size,
+            num_classes,
+        );
+
+        // Create the Scalar Loss Tensor
+        let mut loss_tensor = Tensor::from_slice(DType::F32, Shape::new([1]), &[loss_val]);
+
+        // Attach to Autograd Graph
+        if self.requires_grad {
+            let op = crate::ops::cross_entropy::CrossEntropyLoss {
+                logits: self.clone(),
+                targets: targets.to_vec(),
+                softmax_probs,
+                batch_size,
+                num_classes,
+            };
+            loss_tensor = loss_tensor.with_node(std::sync::Arc::new(op), vec![self.clone()]);
+        }
+
+        loss_tensor
+    }
 }
