@@ -19,7 +19,6 @@ pub use binary::add;
 pub use concat::cat_2d;
 pub use layer_norm::{layer_norm_backward, layer_norm_forward};
 pub use matmul::matmul;
-pub use reduce::{sum_all, sum_axis};
 pub use rms_norm::{rms_norm_backward, rms_norm_forward};
 
 /// A recursive helper to iterate over an N-dimensional shape,
@@ -92,3 +91,4 @@ pub fn copy(from: &Tensor, to: &Tensor) {
     });
 }
 pub mod broadcast;
+pub use reduce::{sum_all, sum_axis};

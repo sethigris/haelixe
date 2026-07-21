@@ -26,6 +26,8 @@ pub struct GpuContext {
     flash_attn_bind_group_layout: wgpu::BindGroupLayout,
     pub binary_broadcast_pipeline: wgpu::ComputePipeline,
     pub binary_broadcast_bind_group_layout: wgpu::BindGroupLayout,
+    pub reduce_pipeline: wgpu::ComputePipeline,
+    pub reduce_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
@@ -617,6 +619,60 @@ impl GpuContext {
                 compilation_options: Default::default(),
             });
 
+        let reduce_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("reduce_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reduce.wgsl").into()),
+        });
+        let reduce_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("reduce_bg_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let reduce_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("reduce_pipeline_layout"),
+                bind_group_layouts: &[&reduce_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let reduce_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("reduce_pipeline"),
+            layout: Some(&reduce_pipeline_layout),
+            module: &reduce_shader,
+            entry_point: "main",
+            compilation_options: Default::default(),
+        });
+
         Arc::new(Self {
             device,
             queue,
@@ -637,6 +693,8 @@ impl GpuContext {
             flash_attn_bind_group_layout,
             binary_broadcast_pipeline,
             binary_broadcast_bind_group_layout,
+            reduce_bind_group_layout,
+            reduce_pipeline,
         })
     }
 
@@ -1442,6 +1500,98 @@ impl GpuContext {
             s.insert(0, 0);
         } // Pad left for WGSL uniform buffer
         s
+    }
+
+    pub fn reduce_gpu(
+        ctx: &Arc<GpuContext>,
+        x: &Tensor,
+        total: usize,
+        op_code: u32, // 0 = Sum, 1 = Mean
+    ) -> Tensor {
+        let x_alloc = x.storage.get_gpu_allocation().unwrap();
+        let num_wg = (total + 255) / 256;
+
+        // 1. Allocate intermediate buffer for workgroup sums (STORAGE | COPY_SRC)
+        let wg_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reduce_wg_sums"),
+            size: (num_wg * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // 2. Allocate mappable staging buffer for CPU readback (MAP_READ | COPY_DST)
+        let staging_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reduce_staging"),
+            size: (num_wg * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let params_data: [u32; 4] = [total as u32, 0, 0, 0];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("reduce_params"),
+                contents: bytemuck::cast_slice(&params_data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("reduce_bg"),
+            layout: &ctx.reduce_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: x_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wg_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&ctx.reduce_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(num_wg as u32, 1, 1);
+        }
+        // Copy the tiny workgroup sums to the staging buffer
+        encoder.copy_buffer_to_buffer(&wg_buffer, 0, &staging_buffer, 0, (num_wg * 4) as u64);
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        // 3. Hybrid CPU Finish: Read back the ~40 workgroup sums and finalize
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).unwrap();
+        });
+        ctx.device.poll(wgpu::Maintain::Wait);
+        receiver.recv().unwrap().unwrap();
+
+        let data = buffer_slice.get_mapped_range();
+        let wg_sums: &[f32] = bytemuck::cast_slice(&data);
+        let final_sum: f32 = wg_sums.iter().sum();
+        drop(data);
+        staging_buffer.unmap();
+
+        let val = if op_code == 1 {
+            final_sum / total as f32
+        } else {
+            final_sum
+        };
+        Tensor::from_slice(crate::DType::F32, crate::Shape::new([1]), &[val])
     }
 }
 

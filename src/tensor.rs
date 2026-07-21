@@ -145,40 +145,27 @@ impl Tensor {
         "cpu"
     }
 
-    pub fn add(&self, other: &Tensor) -> Tensor {
-        // Only use GPU if BOTH tensors are on GPU
-        let out = if self.device.is_gpu() && other.device.is_gpu() {
-            let ctx = match &self.device {
-                Device::Gpu(c) => c.clone(),
-                _ => unreachable!(),
-            };
-            GpuContext::add_gpu_resident(&ctx, self, other)
-        } else {
-            // For mixed or pure-CPU cases, ensure both are on CPU first
-            let a_cpu = self.ensure_cpu();
-            let b_cpu = other.ensure_cpu();
-            crate::kernels::add(&a_cpu, &b_cpu)
-        };
-
-        if self.requires_grad || other.requires_grad {
-            let op = std::sync::Arc::new(crate::ops::add::AddOp {
-                a_shape: self.shape.clone(),
-                b_shape: other.shape.clone(),
+    /// Forward pass: Sum all elements to a scalar (Autograd aware)
+    pub fn sum(&self) -> Tensor {
+        let out = crate::kernels::reduce::reduce_forward(self, 0);
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::reduce::ReduceOp {
+                orig_shape: self.shape.clone(),
+                op_code: 0,
             });
-            out.with_node(op, vec![self.clone(), other.clone()])
+            out.with_node(op, vec![self.clone()])
         } else {
             out
         }
     }
 
-    /// Forward pass: Sum all elements to a scalar (Autograd aware)
-    pub fn sum(&self) -> Tensor {
-        let out = crate::kernels::sum_all(self);
-
+    /// Forward pass: Mean of all elements to a scalar (Autograd aware)
+    pub fn mean(&self) -> Tensor {
+        let out = crate::kernels::reduce::reduce_forward(self, 1);
         if self.requires_grad {
-            let op = std::sync::Arc::new(crate::ops::sum::SumOp {
-                input_shape: self.shape.clone(),
-                dtype: self.dtype,
+            let op = std::sync::Arc::new(crate::ops::reduce::ReduceOp {
+                orig_shape: self.shape.clone(),
+                op_code: 1,
             });
             out.with_node(op, vec![self.clone()])
         } else {
@@ -837,6 +824,11 @@ impl Tensor {
         } else {
             out
         }
+    }
+
+    /// Inherent add method for explicit API calls (e.g., in Linear layers).
+    pub fn add(&self, other: &Tensor) -> Tensor {
+        self.binary_broadcast(other, 0)
     }
 }
 
