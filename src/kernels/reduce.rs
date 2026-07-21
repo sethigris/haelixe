@@ -1,6 +1,6 @@
+use crate::{DType, Device, Shape, Tensor};
 use rayon::prelude::*;
 use std::sync::Mutex;
-use crate::{DType, Device, Shape, Tensor};
 
 // --------------------------------------------------------------------------
 // Module: kernels::reduce
@@ -51,9 +51,8 @@ pub fn reduce_forward(x: &Tensor, op_code: u32) -> Tensor {
     // Fallback to CPU if not on GPU
     if !x.device.is_gpu() {
         let x_cpu = x.ensure_cpu();
-        let slice = unsafe {
-            std::slice::from_raw_parts(x_cpu.storage.as_ptr() as *const f32, total)
-        };
+        let slice =
+            unsafe { std::slice::from_raw_parts(x_cpu.storage.as_ptr() as *const f32, total) };
         let sum: f32 = slice.iter().sum();
         let val = if op_code == 1 {
             sum / total as f32
@@ -84,8 +83,8 @@ pub fn reduce_backward(grad: &Tensor, orig_shape: &Shape, op_code: u32) -> Tenso
     // Create a tensor of 1.0s with the original shape on the same device.
     // This acts as the carrier for the broadcasted gradient.
     let ones_data = vec![1.0f32; total];
-    let ones = Tensor::from_slice(DType::F32, orig_shape.clone(), &ones_data)
-        .to(grad.device.clone());
+    let ones =
+        Tensor::from_slice(DType::F32, orig_shape.clone(), &ones_data).to(grad.device.clone());
 
     // Scale the incoming scalar gradient (e.g., multiply by 1/N for mean)
     let grad_scaled = grad.mul_scalar(scale);
@@ -118,7 +117,7 @@ pub fn sum_axis(tensor: &Tensor, axis: usize) -> Tensor {
     let total_in = t.shape.num_elements();
     let total_out: usize = out_shape.iter().product();
 
-    // Calculate contiguous strides for the output tensor to map N-dim 
+    // Calculate contiguous strides for the output tensor to map N-dim
     // coordinates back to a flat 1D memory offset efficiently.
     let mut out_strides = vec![0usize; out_shape.len()];
     if !out_shape.is_empty() {
@@ -156,7 +155,7 @@ pub fn sum_axis(tensor: &Tensor, axis: usize) -> Tensor {
         }
 
         let val = *((t_ptr as *const f32).add(idx));
-        
+
         // Thread-safe accumulation
         let mut lock = out_mutex.lock().unwrap();
         lock[out_flat] += val;
@@ -166,7 +165,7 @@ pub fn sum_axis(tensor: &Tensor, axis: usize) -> Tensor {
     Tensor::from_slice(DType::F32, Shape::new(out_shape), &out)
 }
 
-/// Computes the global sum of all elements. 
+/// Computes the global sum of all elements.
 /// Acts as a compatibility wrapper for legacy ops that expect `sum_all`.
 pub fn sum_all(tensor: &Tensor) -> Tensor {
     reduce_forward(tensor, 0)
@@ -178,7 +177,7 @@ pub fn sum_all(tensor: &Tensor) -> Tensor {
 // The `sum_axis` implementation currently relies on a `Mutex` for parallel
 // accumulation. While mathematically pure and strictly safe from the race
 // conditions that plagued earlier raw-pointer iterations, the lock contention
-// will severely bottleneck performance on massive tensors. 
+// will severely bottleneck performance on massive tensors.
 //
 // The engineer who inherits this file is urged to replace the `Mutex` with
 // a thread-local chunking strategy (e.g., Rayon's `fold` and `reduce`), or

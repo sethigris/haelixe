@@ -28,6 +28,8 @@ pub struct GpuContext {
     pub binary_broadcast_bind_group_layout: wgpu::BindGroupLayout,
     pub reduce_pipeline: wgpu::ComputePipeline,
     pub reduce_bind_group_layout: wgpu::BindGroupLayout,
+    pub unary_pipeline: wgpu::ComputePipeline,
+    pub unary_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
@@ -673,6 +675,60 @@ impl GpuContext {
             compilation_options: Default::default(),
         });
 
+        let unary_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("unary_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/unary.wgsl").into()),
+        });
+        let unary_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("unary_bg_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let unary_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("unary_pipeline_layout"),
+                bind_group_layouts: &[&unary_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let unary_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("unary_pipeline"),
+            layout: Some(&unary_pipeline_layout),
+            module: &unary_shader,
+            entry_point: "main",
+            compilation_options: Default::default(),
+        });
+
         Arc::new(Self {
             device,
             queue,
@@ -695,6 +751,8 @@ impl GpuContext {
             binary_broadcast_bind_group_layout,
             reduce_bind_group_layout,
             reduce_pipeline,
+            unary_pipeline,
+            unary_bind_group_layout,
         })
     }
 
@@ -1578,6 +1636,70 @@ impl GpuContext {
             final_sum
         };
         Tensor::from_slice(crate::DType::F32, crate::Shape::new([1]), &[val])
+    }
+
+    pub fn unary_gpu(ctx: &Arc<GpuContext>, x: &Tensor, op_code: u32) -> Tensor {
+        let total = x.shape.num_elements();
+        let out_bytes = total * std::mem::size_of::<f32>();
+        let x_alloc = x.storage.get_gpu_allocation().unwrap();
+        let out_alloc = ctx.arena.allocate(&ctx.device, out_bytes as u64);
+
+        let params_data: [u32; 4] = [total as u32, op_code, 0, 0];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("unary_params"),
+                contents: bytemuck::cast_slice(&params_data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("unary_bg"),
+            layout: &ctx.unary_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: x_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_alloc.as_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&ctx.unary_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(((total + 255) / 256) as u32, 1, 1);
+        }
+        ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        Tensor {
+            id: crate::TensorId::next(),
+            dtype: crate::DType::F32,
+            shape: x.shape.clone(),
+            strides: x.strides.clone(),
+            storage: std::sync::Arc::new(crate::storage::CpuStorage::from_gpu_allocation(
+                out_alloc,
+            )),
+            byte_offset: 0,
+            device: crate::Device::Gpu(ctx.clone()),
+            requires_grad: false,
+            grad: None,
+            node: None,
+        }
     }
 }
 

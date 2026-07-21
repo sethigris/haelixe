@@ -830,6 +830,47 @@ impl Tensor {
     pub fn add(&self, other: &Tensor) -> Tensor {
         self.binary_broadcast(other, 0)
     }
+
+    fn unary_op(&self, op_code: u32) -> Tensor {
+        let out = if self.device.is_gpu() {
+            let ctx = match &self.device {
+                crate::Device::Gpu(c) => c.clone(),
+                _ => unreachable!(),
+            };
+            crate::gpu::GpuContext::unary_gpu(&ctx, self, op_code)
+        } else {
+            crate::kernels::unary::forward_cpu(self, op_code)
+        };
+
+        if self.requires_grad {
+            let op = std::sync::Arc::new(crate::ops::unary::UnaryOp {
+                x: self.clone(),
+                op_code,
+            });
+            out.with_node(op, vec![self.clone()])
+        } else {
+            out
+        }
+    }
+
+    pub fn exp(&self) -> Tensor {
+        self.unary_op(0)
+    }
+    pub fn log(&self) -> Tensor {
+        self.unary_op(1)
+    }
+    pub fn sqrt(&self) -> Tensor {
+        self.unary_op(2)
+    }
+    pub fn tanh(&self) -> Tensor {
+        self.unary_op(3)
+    }
+   
+       pub fn relu(&self) -> Tensor { self.unary_op(4) }
+   pub fn gelu(&self) -> Tensor { self.unary_op(5) }
+    pub fn silu(&self) -> Tensor {
+        self.unary_op(6)
+    }
 }
 
 impl std::ops::Add for &Tensor {
