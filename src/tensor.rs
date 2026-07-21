@@ -260,17 +260,6 @@ impl Tensor {
         }
     }
 
-    pub fn relu(&self) -> Tensor {
-        let out = crate::kernels::activations::relu(self);
-        if self.requires_grad {
-            let op = std::sync::Arc::new(crate::ops::relu::ReluOp {
-                input: self.clone(),
-            });
-            out.with_node(op, vec![self.clone()])
-        } else {
-            out
-        }
-    }
 
     /// Transfers tensor data between CPU and GPU.
     pub fn to(&self, device: Device) -> Tensor {
@@ -655,17 +644,6 @@ impl Tensor {
         }
     }
 
-    pub fn gelu(&self) -> Tensor {
-        let out = crate::kernels::gelu(self);
-        if self.requires_grad {
-            let op = std::sync::Arc::new(crate::ops::gelu::GELUOp {
-                input: self.clone(),
-            });
-            out.with_node(op, vec![self.clone()])
-        } else {
-            out
-        }
-    }
 
     /// Casts the tensor to a different data type.
     /// VETERAN SYSTEMS NOTE: Casting F32 to BF16 truncates the lower 16 bits of the
