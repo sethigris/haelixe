@@ -1487,20 +1487,6 @@ impl GpuContext {
     }
 
     // Helper to ensure 6D padding for WGSL
-    fn out_strides(shape: &[usize]) -> Vec<usize> {
-        let mut s = vec![0; shape.len()];
-        if !shape.is_empty() {
-            let mut acc = 1;
-            for i in (0..shape.len()).rev() {
-                s[i] = acc;
-                acc *= shape[i];
-            }
-        }
-        while s.len() < 6 {
-            s.insert(0, 0);
-        } // Pad left for WGSL uniform buffer
-        s
-    }
 
     pub fn reduce_gpu(
         ctx: &Arc<GpuContext>,
