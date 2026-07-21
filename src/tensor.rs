@@ -406,7 +406,7 @@ impl Tensor {
     }
 
     pub fn softmax(&self) -> Tensor {
-        let out = crate::kernels::softmax(self);
+        let out = crate::kernels::softmax::softmax_forward(self);
         if self.requires_grad {
             let op = std::sync::Arc::new(crate::ops::softmax::SoftmaxOp {
                 output: out.clone(),
