@@ -217,6 +217,37 @@ impl Tensor {
         grads
     }
 
+    /// Reverse-mode AD with a custom seed gradient.
+    /// Used for testing Jacobian correctness and computing
+    /// vector-Jacobian products (VJPs).
+    pub fn backward_with_seed(
+        &self,
+        seed: &Tensor,
+    ) -> std::collections::HashMap<crate::TensorId, Tensor> {
+        let topo = self.topo_sort();
+        let mut grads = std::collections::HashMap::new();
+        grads.insert(self.id, seed.clone());
+        for tensor in topo {
+            if let Some(grad_out) = grads.get(&tensor.id) {
+                if let Some(node) = &tensor.node {
+                    let parent_grads = node.op.backward(grad_out);
+                    for (parent, grad) in node.parents.iter().zip(parent_grads.into_iter()) {
+                        if let Some(g) = grad {
+                            grads
+                                .entry(parent.id)
+                                .and_modify(|existing| {
+                                    let summed = crate::kernels::add(existing, &g);
+                                    *existing = summed;
+                                })
+                                .or_insert(g);
+                        }
+                    }
+                }
+            }
+        }
+        grads
+    }
+
     /// Zero-cost transposition of a 2D tensor.
     /// We literally just swap the shapes and strides. No memory is copied!
     pub fn t(&self) -> Tensor {
@@ -259,7 +290,6 @@ impl Tensor {
             out
         }
     }
-
 
     /// Transfers tensor data between CPU and GPU.
     pub fn to(&self, device: Device) -> Tensor {
@@ -644,7 +674,6 @@ impl Tensor {
         }
     }
 
-
     /// Casts the tensor to a different data type.
     /// VETERAN SYSTEMS NOTE: Casting F32 to BF16 truncates the lower 16 bits of the
     /// mantissa. This halves the VRAM footprint and PCIe bandwidth requirements at
@@ -843,9 +872,13 @@ impl Tensor {
     pub fn tanh(&self) -> Tensor {
         self.unary_op(3)
     }
-   
-       pub fn relu(&self) -> Tensor { self.unary_op(4) }
-   pub fn gelu(&self) -> Tensor { self.unary_op(5) }
+
+    pub fn relu(&self) -> Tensor {
+        self.unary_op(4)
+    }
+    pub fn gelu(&self) -> Tensor {
+        self.unary_op(5)
+    }
     pub fn silu(&self) -> Tensor {
         self.unary_op(6)
     }

@@ -92,5 +92,5 @@ pub fn copy(from: &Tensor, to: &Tensor) {
 }
 pub mod broadcast;
 pub use reduce::{sum_all, sum_axis};
-pub mod unary;
 pub mod softmax;
+pub mod unary;

@@ -99,13 +99,3 @@ pub fn softmax_backward(y: &Tensor, grad: &Tensor) -> Tensor {
     });
     Tensor::from_slice(DType::F32, y_cpu.shape.clone(), &dx_data)
 }
-
-// --------------------------------------------------------------------------
-// CODA ON HUMILITY
-// --------------------------------------------------------------------------
-// This implementation is strictly CPU-bound and iterates row-by-row.
-// While mathematically pure and numerically stable, it will bottleneck
-// on massive sequence lengths (e.g., 32k context windows). The engineer
-// who inherits this file must replace this Rayon loop with a WGSL
-// compute shader utilizing Workgroup Shared Memory (SRAM) reductions.
-// --------------------------------------------------------------------------

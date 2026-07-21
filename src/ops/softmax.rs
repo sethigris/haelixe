@@ -1,4 +1,5 @@
-use crate::{Tensor, autograd::Op};
+use crate::{Tensor, DType, autograd::Op};
+use rayon::prelude::*;
 
 #[derive(Debug)]
 pub struct SoftmaxOp {
@@ -10,8 +11,8 @@ pub struct SoftmaxOp {
 impl Op for SoftmaxOp {
     fn name(&self) -> &'static str { "Softmax" }
     
-    fn backward(&self, grad: &Tensor) -> Vec<Option<Tensor>> {
-        let dx = crate::kernels::softmax::softmax_backward(&self.output, grad);
+    fn backward(&self, grad_output: &Tensor) -> Vec<Option<Tensor>> {
+        let dx = crate::kernels::softmax::softmax_backward(&self.output, grad_output);
         vec![Some(dx)]
     }
 }
