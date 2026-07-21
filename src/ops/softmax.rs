@@ -1,10 +1,8 @@
-use crate::{Tensor, DType, autograd::Op};
-use rayon::prelude::*;
+use crate::{Tensor, autograd::Op};
 
 #[derive(Debug)]
 pub struct SoftmaxOp {
     // CRITICAL: We store the OUTPUT (y), not the input (x).
-    // The Jacobian of Softmax requires the probabilities, not the logits.
     pub output: Tensor, 
 }
 
