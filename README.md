@@ -137,13 +137,3 @@ fn main() {
     }
 }
 ```
-
----
-
-## 📊 Developer Stats
-
-![GitHub Stats](https://github-readme-stats.shion.dev/api?username=sethigris&theme=dark&hide_border=false&include_all_commits=true&count_private=false)
-![GitHub Streak](https://streak-stats.demolab.com/?user=sethigris&theme=dark&hide_border=false)
-![Top Languages](https://github-readme-stats.shion.dev/api/top-langs/?username=sethigris&theme=dark&hide_border=false&include_all_commits=true&count_private=false&layout=compact)
-
-[![Profile Views](https://komarev.com/ghpvc/?username=sethigris&icon=0&color=0)](https://visitcount.itsvg.in)
