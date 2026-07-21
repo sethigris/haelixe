@@ -10,8 +10,8 @@ pub struct SoftmaxOp {
 impl Op for SoftmaxOp {
     fn name(&self) -> &'static str { "Softmax" }
     
-    fn backward(&self, grad_output: &Tensor) -> Vec<Option<Tensor>> {
-        let dx = crate::kernels::softmax::softmax_backward(&self.output, grad_output);
+    fn backward(&self, grad: &Tensor) -> Vec<Option<Tensor>> {
+        let dx = crate::kernels::softmax::softmax_backward(&self.output, grad);
         vec![Some(dx)]
     }
 }
