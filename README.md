@@ -23,8 +23,6 @@ It features a dynamic computation graph (Autograd), modern LLM architectural pri
 
 </div>
 
-![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
-
 ---
 
 ## Core Architecture and Modern LLM Primitives
