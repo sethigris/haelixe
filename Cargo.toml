@@ -17,3 +17,7 @@ rand = "0.8"
 members = [
     "haelixe-lab",
 ]
+
+
+[package]
+license = "MIT OR Apache-2.0"
