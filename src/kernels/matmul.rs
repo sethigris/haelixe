@@ -59,6 +59,7 @@ pub fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
 
     out
 }
+
 fn matmul_typed<T: bytemuck::Pod + std::ops::Add<Output = T> + std::ops::Mul<Output = T> + Copy>(
     a: &Tensor,
     b: &Tensor,
@@ -88,5 +89,38 @@ fn matmul_typed<T: bytemuck::Pod + std::ops::Add<Output = T> + std::ops::Mul<Out
     let b_ptr = SyncPtr(b_slice.as_ptr());
     let out_ptr = SyncMutPtr(out_slice.as_mut_ptr());
 
-    // … rest of the parallel block loop remains the same, using a_ptr.get(), etc.
+    let num_blocks_m = (m + BLOCK_M - 1) / BLOCK_M;
+    let num_blocks_n = (n + BLOCK_N - 1) / BLOCK_N;
+
+    (0..num_blocks_m).into_par_iter().for_each(|bm| {
+        for bn in 0..num_blocks_n {
+            let m_start = bm * BLOCK_M;
+            let m_end = (m_start + BLOCK_M).min(m);
+            let n_start = bn * BLOCK_N;
+            let n_end = (n_start + BLOCK_N).min(n);
+            let num_blocks_k = (k + BLOCK_K - 1) / BLOCK_K;
+
+            for bk in 0..num_blocks_k {
+                let k_start = bk * BLOCK_K;
+                let k_end = (k_start + BLOCK_K).min(k);
+
+                for i in m_start..m_end {
+                    let c_row_ptr = unsafe { out_ptr.get().add(i * n) };
+                    let a_row_ptr = unsafe { a_ptr.get().add(i * k) };
+
+                    for p in k_start..k_end {
+                        let a_val = unsafe { *a_row_ptr.add(p) };
+                        let b_row_ptr = unsafe { b_ptr.get().add(p * n) };
+
+                        for j in n_start..n_end {
+                            unsafe {
+                                let c_ptr = c_row_ptr.add(j);
+                                *c_ptr = *c_ptr + (a_val * *b_row_ptr.add(j));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
