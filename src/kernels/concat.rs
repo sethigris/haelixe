@@ -1,18 +1,30 @@
 use crate::{Shape, Tensor};
 
-/// Concatenates a list of 2D tensors along a new leading dimension (dim 0).
 pub fn cat_2d(tensors: &[Tensor]) -> Tensor {
-    assert!(!tensors.is_empty(), "Cannot concatenate empty tensor list");
-    let n = tensors.len();
-    let s = tensors[0].shape.dims()[0];
-    let d = tensors[0].shape.dims()[1];
-
-    let out = Tensor::empty(tensors[0].dtype, Shape::new([n, s, d]));
-
-    // Physically copy each 2D slice into the 3D buffer
-    for (i, t) in tensors.iter().enumerate() {
-        let out_slice = out.get_2d_slice(i);
-        crate::kernels::copy(t, &out_slice);
+    assert!(!tensors.is_empty(), "cat_2d requires at least one tensor");
+    let cols = tensors[0].shape.dims()[1];
+    let total_rows: usize = tensors.iter().map(|t| t.shape.dims()[0]).sum();
+    let out = Tensor::zeros(tensors[0].dtype, Shape::new([total_rows, cols]));
+    let out_slice = unsafe {
+        let slice = out.storage.as_f32_slice_mut();
+        let offset = out.byte_offset / std::mem::size_of::<f32>();
+        &mut slice[offset..][..total_rows * cols]
+    };
+    let mut row_offset = 0;
+    for t in tensors {
+        let t_cpu = t.ensure_cpu();
+        let t_rows = t_cpu.shape.dims()[0];
+        let t_slice = unsafe {
+            let slice = t_cpu.storage.as_f32_slice();
+            let offset = t_cpu.byte_offset / std::mem::size_of::<f32>();
+            &slice[offset..][..t_rows * cols]
+        };
+        for r in 0..t_rows {
+            let src = &t_slice[r * cols..(r + 1) * cols];
+            let dst = &mut out_slice[(row_offset + r) * cols..(row_offset + r + 1) * cols];
+            dst.copy_from_slice(src);
+        }
+        row_offset += t_rows;
     }
     out
 }

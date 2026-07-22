@@ -2,7 +2,6 @@ use crate::{DType, Shape, Tensor};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
-// Helper to calculate contiguous strides directly from a shape slice
 fn get_contiguous_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![0; shape.len()];
     if shape.is_empty() {
@@ -67,11 +66,23 @@ pub fn forward_cpu(
     let total: usize = out_shape.iter().product();
     let mut out = vec![0.0f32; total];
     let ndim = out_shape.len();
-    let ap = a_cpu.storage.as_ptr() as *const f32 as usize;
-    let bp = b_cpu.storage.as_ptr() as *const f32 as usize;
-    let op_ptr = out.as_mut_ptr() as usize;
 
-    (0..total).into_par_iter().for_each(|idx| unsafe {
+    // Safe slices for reading (immutable, shared across threads)
+    let a_data = unsafe {
+        let slice = a_cpu.storage.as_f32_slice();
+        let offset = a_cpu.byte_offset / std::mem::size_of::<f32>();
+        &slice[offset..][..a_cpu.shape.num_elements()]
+    };
+    let b_data = unsafe {
+        let slice = b_cpu.storage.as_f32_slice();
+        let offset = b_cpu.byte_offset / std::mem::size_of::<f32>();
+        &slice[offset..][..b_cpu.shape.num_elements()]
+    };
+
+    // Raw pointer for writing (each index written by exactly one thread)
+    let out_ptr = out.as_mut_ptr() as usize;
+
+    (0..total).into_par_iter().for_each(|idx| {
         let mut rem = idx;
         let mut oa = 0;
         let mut ob = 0;
@@ -81,8 +92,8 @@ pub fn forward_cpu(
             oa += c * sa[d];
             ob += c * sb[d];
         }
-        let va = *((ap as *const f32).add(oa));
-        let vb = *((bp as *const f32).add(ob));
+        let va = a_data[oa];
+        let vb = b_data[ob];
         let res = match op {
             0 => va + vb,
             1 => va * vb,
@@ -90,8 +101,11 @@ pub fn forward_cpu(
             3 => va / vb,
             _ => 0.0,
         };
-        *((op_ptr as *mut f32).add(idx)) = res;
+        unsafe {
+            *((out_ptr as *mut f32).add(idx)) = res;
+        }
     });
+
     Tensor::from_slice(DType::F32, Shape::new(out_shape.to_vec()), &out)
 }
 
@@ -109,17 +123,31 @@ pub fn backward_cpu(
     let b_cpu = b.ensure_cpu();
     let total: usize = out_shape.iter().product();
     let ndim = out_shape.len();
-    let da_m = Mutex::new(vec![0.0f32; a_cpu.shape.num_elements()]);
-    let db_m = Mutex::new(vec![0.0f32; b_cpu.shape.num_elements()]);
-    let gp = g_cpu.storage.as_ptr() as *const f32 as usize;
-    let ap = a_cpu.storage.as_ptr() as *const f32 as usize;
-    let bp = b_cpu.storage.as_ptr() as *const f32 as usize;
+    let a_elems = a_cpu.shape.num_elements();
+    let b_elems = b_cpu.shape.num_elements();
+    let da = Mutex::new(vec![0.0f32; a_elems]);
+    let db = Mutex::new(vec![0.0f32; b_elems]);
 
-    // Use the helper instead of Strides.dims()
+    let g_data = unsafe {
+        let slice = g_cpu.storage.as_f32_slice();
+        let offset = g_cpu.byte_offset / std::mem::size_of::<f32>();
+        &slice[offset..][..total]
+    };
+    let a_data = unsafe {
+        let slice = a_cpu.storage.as_f32_slice();
+        let offset = a_cpu.byte_offset / std::mem::size_of::<f32>();
+        &slice[offset..][..a_elems]
+    };
+    let b_data = unsafe {
+        let slice = b_cpu.storage.as_f32_slice();
+        let offset = b_cpu.byte_offset / std::mem::size_of::<f32>();
+        &slice[offset..][..b_elems]
+    };
+
     let as_orig = get_contiguous_strides(a_cpu.shape.dims());
     let bs_orig = get_contiguous_strides(b_cpu.shape.dims());
 
-    (0..total).into_par_iter().for_each(|idx| unsafe {
+    (0..total).into_par_iter().for_each(|idx| {
         let mut rem = idx;
         let mut oa = 0;
         let mut ob = 0;
@@ -147,21 +175,21 @@ pub fn backward_cpu(
                 ob_orig += c * bs_orig[d - (ndim - b_cpu.shape.dims().len())];
             }
         }
-        let gv = *((gp as *const f32).add(idx));
-        let va = *((ap as *const f32).add(oa));
-        let vb = *((bp as *const f32).add(ob));
-        let (da, db) = match op {
+        let gv = g_data[idx];
+        let va = a_data[oa];
+        let vb = b_data[ob];
+        let (da_val, db_val) = match op {
             0 => (gv, gv),
             1 => (gv * vb, gv * va),
             2 => (gv, -gv),
             3 => (gv / vb, -gv * va / (vb * vb)),
             _ => (0.0, 0.0),
         };
-        da_m.lock().unwrap()[oa_orig] += da;
-        db_m.lock().unwrap()[ob_orig] += db;
+        da.lock().unwrap()[oa_orig] += da_val;
+        db.lock().unwrap()[ob_orig] += db_val;
     });
     (
-        Tensor::from_slice(DType::F32, a_cpu.shape.clone(), &da_m.into_inner().unwrap()),
-        Tensor::from_slice(DType::F32, b_cpu.shape.clone(), &db_m.into_inner().unwrap()),
+        Tensor::from_slice(DType::F32, a_cpu.shape.clone(), &da.into_inner().unwrap()),
+        Tensor::from_slice(DType::F32, b_cpu.shape.clone(), &db.into_inner().unwrap()),
     )
 }
