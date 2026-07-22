@@ -4,10 +4,10 @@
 
 # Haelixe: A Bare-Metal Deep Learning Engine in Rust
 
-Haelixe is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Haelixe leverages pure Rust for its core CPU compute engine and uses the `wgpu` crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
 
-It features a dynamic computation graph (Autograd), modern LLM architectural primitives, a deterministic memory allocator, and a mixed-precision foundation.
+**Haelixe** (pronounced Hay‑lix) is a high‑performance, research‑grade deep learning engine built entirely from scratch in pure Rust. Unlike frameworks that wrap C++ or CUDA libraries, Haelixe forges its own path: every tensor operation, every gradient, and every memory allocation is written by hand, giving you full control over performance and correctness. The CPU engine uses rayon for lock‑free parallelism, while GPU compute is handled by hand‑crafted WGSL shaders dispatched through the wgpu crate to Vulkan, Metal, or DirectX 12 backends — no CUDA, no proprietary drivers.
 
+Under the hood, Haelixe provides a dynamic computation graph with reverse‑mode automatic differentiation, zero‑copy strided tensor views, and advanced memory management including a binning slab allocator for deterministic VRAM reclamation. It natively supports mixed‑precision training with BF16 storage, just‑in‑time autocast to F32, and the master‑weights pattern. The built‑in neural network modules include modern Transformer primitives like Rotary Position Embeddings (RoPE), RMSNorm, GELU activations, and a fused flash‑attention kernel that keeps the entire attention score calculation inside the GPU’s L1 cache. All of this is designed to let researchers push the limits of large‑language models directly on bare metal, from first principles.
 ---
 
 ## 💻 Stack
