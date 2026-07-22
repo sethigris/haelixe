@@ -1,6 +1,8 @@
-![Haelixe Logo](./haelixe.png)
+<div align="center">
+  <img src="./haelixe.png" alt="Haelixe Logo" width="300"/>
+</div>
 
-# 💫 Haelixe: A Bare-Metal Deep Learning Engine in Rust
+# Haelixe: A Bare-Metal Deep Learning Engine in Rust
 
 Haelixe is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Haelixe leverages pure Rust for its core CPU compute engine and uses the `wgpu` crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
 
@@ -8,13 +10,22 @@ It features a dynamic computation graph (Autograd), modern LLM architectural pri
 
 ---
 
-## 💻 Tech Stack
+## 💻 Stack
 
-![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
+<div align="center">
+
+![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
+![Language](https://img.shields.io/badge/language-Rust-orange)
+![Status](https://img.shields.io/badge/status-research--grade-brightgreen)
+![Build](https://img.shields.io/github/actions/workflow/status/sethigris/haelixe/ci.yml?branch=main)
+![Tests](https://img.shields.io/github/actions/workflow/status/sethigris/haelixe/ci.yml?branch=main&label=tests)
+![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)
+
+</div>
 
 ---
 
-## 🧠 Core Architecture and Modern LLM Primitives
+## Core Architecture and Modern LLM Primitives
 
 ### Modern Transformer Primitives
 Haelixe implements the exact mathematical foundations used by state-of-the-art architectures like LLaMA 3 and Mistral:
