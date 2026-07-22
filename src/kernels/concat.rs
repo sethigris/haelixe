@@ -7,8 +7,7 @@ pub fn cat_2d(tensors: &[Tensor]) -> Tensor {
     let out = Tensor::zeros(tensors[0].dtype, Shape::new([total_rows, cols]));
     let out_slice = unsafe {
         let slice = out.storage.as_f32_slice_mut();
-        let offset = out.byte_offset / std::mem::size_of::<f32>();
-        &mut slice[offset..][..total_rows * cols]
+        &mut slice[..total_rows * cols]
     };
     let mut row_offset = 0;
     for t in tensors {
@@ -16,14 +15,9 @@ pub fn cat_2d(tensors: &[Tensor]) -> Tensor {
         let t_rows = t_cpu.shape.dims()[0];
         let t_slice = unsafe {
             let slice = t_cpu.storage.as_f32_slice();
-            let offset = t_cpu.byte_offset / std::mem::size_of::<f32>();
-            &slice[offset..][..t_rows * cols]
+            &slice[..t_rows * cols]
         };
-        for r in 0..t_rows {
-            let src = &t_slice[r * cols..(r + 1) * cols];
-            let dst = &mut out_slice[(row_offset + r) * cols..(row_offset + r + 1) * cols];
-            dst.copy_from_slice(src);
-        }
+        out_slice[row_offset * cols..(row_offset + t_rows) * cols].copy_from_slice(t_slice);
         row_offset += t_rows;
     }
     out
