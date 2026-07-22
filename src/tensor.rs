@@ -176,7 +176,7 @@ impl Tensor {
     /// Reverse-mode Automatic Differentiation.
     /// Returns a HashMap mapping every leaf TensorId to its calculated Gradient.
     pub fn backward(&self) -> std::collections::HashMap<TensorId, Tensor> {
-        let topo: Vec<Tensor> = self.topo_sort().into_iter().rev().collect();
+        let topo: Vec<Tensor> = self.topo_sort().into_iter().collect();
         let mut grads = std::collections::HashMap::new();
 
         // Seed the loss gradient with 1.0
@@ -190,18 +190,35 @@ impl Tensor {
             _ => panic!("Unsupported dtype for backward"),
         };
         grads.insert(self.id, seed);
-
+        eprintln!("Backward topo ({} tensors):", topo.len());
+        for t in &topo {
+            eprintln!("  id={:?} node={}", t.id, t.node.is_some());
+        }
+        eprintln!("Initial grads: {:?}", grads.keys().collect::<Vec<_>>());
         // Traverse the graph from Loss -> Leaves
         for tensor in topo {
             if let Some(grad_out) = grads.get(&tensor.id) {
                 if let Some(node) = &tensor.node {
+                    eprintln!(
+                        "Processing tensor {:?}, grad_out shape: {:?}",
+                        tensor.id,
+                        grad_out.shape.dims()
+                    );
                     let parent_grads = node.op.backward(grad_out);
-
-                    // Distribute the gradients to the parents
-                    for (parent, grad) in node.parents.iter().zip(parent_grads.into_iter()) {
+                    eprintln!("Backward returned {} gradients", parent_grads.len());
+                    for (i, (parent, grad)) in node
+                        .parents
+                        .iter()
+                        .zip(parent_grads.into_iter())
+                        .enumerate()
+                    {
+                        eprintln!(
+                            "  parent {}: id {:?}, grad present: {}",
+                            i,
+                            parent.id,
+                            grad.is_some()
+                        );
                         if let Some(g) = grad {
-                            // If a parent is used multiple times in the graph,
-                            // its gradients must be accumulated (added together).
                             grads
                                 .entry(parent.id)
                                 .and_modify(|existing| {
@@ -224,7 +241,7 @@ impl Tensor {
         &self,
         seed: &Tensor,
     ) -> std::collections::HashMap<crate::TensorId, Tensor> {
-        let topo: Vec<Tensor> = self.topo_sort().into_iter().rev().collect();
+        let topo: Vec<Tensor> = self.topo_sort().into_iter().collect();
         let mut grads = std::collections::HashMap::new();
         grads.insert(self.id, seed.clone());
         for tensor in topo {

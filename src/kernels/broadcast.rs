@@ -1,6 +1,4 @@
 use crate::{DType, Shape, Tensor};
-use rayon::prelude::*;
-use std::sync::Mutex;
 
 fn get_contiguous_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![0; shape.len()];
@@ -67,22 +65,16 @@ pub fn forward_cpu(
     let mut out = vec![0.0f32; total];
     let ndim = out_shape.len();
 
-    // Safe slices for reading (immutable, shared across threads)
-    let a_data = unsafe {
-        let slice = a_cpu.storage.as_f32_slice();
-        let offset = a_cpu.byte_offset / std::mem::size_of::<f32>();
-        &slice[offset..][..a_cpu.shape.num_elements()]
-    };
-    let b_data = unsafe {
-        let slice = b_cpu.storage.as_f32_slice();
-        let offset = b_cpu.byte_offset / std::mem::size_of::<f32>();
-        &slice[offset..][..b_cpu.shape.num_elements()]
-    };
+    // Safe slices – byte_offset is 0 for the contiguous tensors we operate on
+    let a_data = unsafe { a_cpu.storage.as_f32_slice() };
+    let b_data = unsafe { b_cpu.storage.as_f32_slice() };
 
-    // Raw pointer for writing (each index written by exactly one thread)
-    let out_ptr = out.as_mut_ptr() as usize;
+    let a_data = unsafe { a_cpu.storage.as_f32_slice() };
+    let b_data = unsafe { b_cpu.storage.as_f32_slice() };
+    eprintln!("a_data first 6: {:?}", &a_data[..a_data.len().min(6)]);
+    eprintln!("b_data first 3: {:?}", &b_data[..b_data.len().min(3)]);
 
-    (0..total).into_par_iter().for_each(|idx| {
+    for idx in 0..total {
         let mut rem = idx;
         let mut oa = 0;
         let mut ob = 0;
@@ -94,18 +86,14 @@ pub fn forward_cpu(
         }
         let va = a_data[oa];
         let vb = b_data[ob];
-        let res = match op {
+        out[idx] = match op {
             0 => va + vb,
             1 => va * vb,
             2 => va - vb,
             3 => va / vb,
             _ => 0.0,
         };
-        unsafe {
-            *((out_ptr as *mut f32).add(idx)) = res;
-        }
-    });
-
+    }
     Tensor::from_slice(DType::F32, Shape::new(out_shape.to_vec()), &out)
 }
 
@@ -121,33 +109,21 @@ pub fn backward_cpu(
     let g_cpu = g.ensure_cpu();
     let a_cpu = a.ensure_cpu();
     let b_cpu = b.ensure_cpu();
-    let total: usize = out_shape.iter().product();
+    let total = out_shape.iter().product();
     let ndim = out_shape.len();
     let a_elems = a_cpu.shape.num_elements();
     let b_elems = b_cpu.shape.num_elements();
-    let da = Mutex::new(vec![0.0f32; a_elems]);
-    let db = Mutex::new(vec![0.0f32; b_elems]);
+    let mut da = vec![0.0f32; a_elems];
+    let mut db = vec![0.0f32; b_elems];
 
-    let g_data = unsafe {
-        let slice = g_cpu.storage.as_f32_slice();
-        let offset = g_cpu.byte_offset / std::mem::size_of::<f32>();
-        &slice[offset..][..total]
-    };
-    let a_data = unsafe {
-        let slice = a_cpu.storage.as_f32_slice();
-        let offset = a_cpu.byte_offset / std::mem::size_of::<f32>();
-        &slice[offset..][..a_elems]
-    };
-    let b_data = unsafe {
-        let slice = b_cpu.storage.as_f32_slice();
-        let offset = b_cpu.byte_offset / std::mem::size_of::<f32>();
-        &slice[offset..][..b_elems]
-    };
+    let g_data = unsafe { g_cpu.storage.as_f32_slice() };
+    let a_data = unsafe { a_cpu.storage.as_f32_slice() };
+    let b_data = unsafe { b_cpu.storage.as_f32_slice() };
 
     let as_orig = get_contiguous_strides(a_cpu.shape.dims());
     let bs_orig = get_contiguous_strides(b_cpu.shape.dims());
 
-    (0..total).into_par_iter().for_each(|idx| {
+    for idx in 0..total {
         let mut rem = idx;
         let mut oa = 0;
         let mut ob = 0;
@@ -185,11 +161,11 @@ pub fn backward_cpu(
             3 => (gv / vb, -gv * va / (vb * vb)),
             _ => (0.0, 0.0),
         };
-        da.lock().unwrap()[oa_orig] += da_val;
-        db.lock().unwrap()[ob_orig] += db_val;
-    });
+        da[oa_orig] += da_val;
+        db[ob_orig] += db_val;
+    }
     (
-        Tensor::from_slice(DType::F32, a_cpu.shape.clone(), &da.into_inner().unwrap()),
-        Tensor::from_slice(DType::F32, b_cpu.shape.clone(), &db.into_inner().unwrap()),
+        Tensor::from_slice(DType::F32, a_cpu.shape.clone(), &da),
+        Tensor::from_slice(DType::F32, b_cpu.shape.clone(), &db),
     )
 }
