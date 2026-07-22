@@ -37,10 +37,10 @@ fn main() {
         //         = exp([-2,-1,0]) / (exp(-2)+exp(-1)+exp(0))
         //         = [0.1353, 0.3679, 1.0] / 1.5032
         //         = [0.0900, 0.2447, 0.6652]
-        
+
         // FIX: Added f32 suffix to force 32-bit memory allocation
         let x = Tensor::from_slice(DType::F32, Shape::new([1, 3]), &[1.0f32, 2.0, 3.0]);
-        
+
         let y = x.softmax();
         let y_cpu = y.ensure_cpu();
         let y_data = unsafe { std::slice::from_raw_parts(y_cpu.storage.as_ptr() as *const f32, 3) };
@@ -70,10 +70,10 @@ fn main() {
     {
         // Naive softmax would compute exp(1000) = Infinity -> NaN
         // LogSumExp trick subtracts max first, keeping values stable
-        
+
         // FIX: Added f32 suffix
         let x = Tensor::from_slice(DType::F32, Shape::new([1, 3]), &[1000.0f32, 1001.0, 1002.0]);
-        
+
         let y = x.softmax();
         let y_cpu = y.ensure_cpu();
         let y_data = unsafe { std::slice::from_raw_parts(y_cpu.storage.as_ptr() as *const f32, 3) };
@@ -101,9 +101,11 @@ fn main() {
         let x = Tensor::from_slice(
             DType::F32,
             Shape::new([3, 4]),
-            &[-1.0f32, 0.0, 1.0, 2.0, 3.0, 1.0, -2.0, 0.5, 0.0, 0.0, 0.0, 0.0],
+            &[
+                -1.0f32, 0.0, 1.0, 2.0, 3.0, 1.0, -2.0, 0.5, 0.0, 0.0, 0.0, 0.0,
+            ],
         );
-        
+
         let y = x.softmax();
         let y_cpu = y.ensure_cpu();
         let y_data =
@@ -146,7 +148,7 @@ fn main() {
         // dx_0 = 0.0900 * (1.0 - 0.0900) = 0.0819
         // dx_1 = 0.2447 * (0.0 - 0.0900) = -0.0220
         // dx_2 = 0.6652 * (0.0 - 0.0900) = -0.0599
-        
+
         // FIX: Added f32 suffixes
         let mut x = Tensor::from_slice(DType::F32, Shape::new([1, 3]), &[1.0f32, 2.0, 3.0]);
         x.requires_grad = true;
@@ -192,7 +194,7 @@ fn main() {
         // Verify softmax works inside a larger computation graph
         // loss = sum(softmax(x)) should have gradient = 0 for all inputs
         // because sum(softmax(x)) = 1.0 (constant), so d/dx = 0
-        
+
         // FIX: Added f32 suffix
         let mut x = Tensor::from_slice(DType::F32, Shape::new([1, 4]), &[1.0f32, 2.0, 3.0, 4.0]);
         x.requires_grad = true;
@@ -234,4 +236,3 @@ fn main() {
     }
     println!("========================================");
 }
-

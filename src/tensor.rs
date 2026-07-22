@@ -176,7 +176,7 @@ impl Tensor {
     /// Reverse-mode Automatic Differentiation.
     /// Returns a HashMap mapping every leaf TensorId to its calculated Gradient.
     pub fn backward(&self) -> std::collections::HashMap<TensorId, Tensor> {
-        let topo = self.topo_sort();
+        let topo: Vec<Tensor> = self.topo_sort().into_iter().rev().collect();
         let mut grads = std::collections::HashMap::new();
 
         // Seed the loss gradient with 1.0
@@ -224,7 +224,7 @@ impl Tensor {
         &self,
         seed: &Tensor,
     ) -> std::collections::HashMap<crate::TensorId, Tensor> {
-        let topo = self.topo_sort();
+        let topo: Vec<Tensor> = self.topo_sort().into_iter().rev().collect();
         let mut grads = std::collections::HashMap::new();
         grads.insert(self.id, seed.clone());
         for tensor in topo {
@@ -251,19 +251,7 @@ impl Tensor {
     /// Zero-cost transposition of a 2D tensor.
     /// We literally just swap the shapes and strides. No memory is copied!
     pub fn t(&self) -> Tensor {
-        assert_eq!(self.rank(), 2, "transpose only supports 2D tensors");
-        Tensor {
-            id: TensorId::next(),
-            dtype: self.dtype,
-            shape: self.shape.reverse(),
-            strides: self.strides.reverse(),
-            storage: self.storage.clone(), // Just clones the Arc!
-            byte_offset: self.byte_offset,
-            requires_grad: self.requires_grad,
-            device: self.device.clone(),
-            grad: None,
-            node: None,
-        }
+        self.transpose(0, 1)
     }
 
     /// Forward pass: Matrix Multiplication (Autograd aware)
@@ -549,11 +537,15 @@ impl Tensor {
         let stride_0 = self.strides.steps()[0];
         let byte_shift = (batch_idx as isize * stride_0) as usize * self.dtype.size_in_bytes();
 
+        // Build new strides that drop the batch dimension but keep inner strides.
+        let inner_strides = &self.strides.steps()[1..]; // [stride_dim1, stride_dim2]
+        let new_strides = Strides::new(inner_strides.to_vec());
+
         let out = Tensor {
             id: TensorId::next(),
             dtype: self.dtype,
             shape: Shape::new([m, n]),
-            strides: Shape::new([m, n]).contiguous_strides(),
+            strides: new_strides,
             storage: self.storage.clone(),
             byte_offset: self.byte_offset + byte_shift,
             device: self.device.clone(),
@@ -562,7 +554,6 @@ impl Tensor {
             node: None,
         };
 
-        // FIX: Attach the Autograd node if gradients are required!
         if self.requires_grad {
             let op = std::sync::Arc::new(crate::ops::slice::GetSliceOp {
                 batch_idx,
