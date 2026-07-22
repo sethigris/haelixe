@@ -1,3 +1,5 @@
+![Haelixe Logo](haelixe.png)
+
 # 💫 Haelixe: A Bare-Metal Deep Learning Engine in Rust
 
 Haelixe is a high-performance, research-grade deep learning framework built entirely from scratch. Unlike frameworks that wrap C++ or CUDA, Haelixe leverages pure Rust for its core CPU compute engine and uses the `wgpu` crate to dispatch WGSL compute shaders to Vulkan, Metal, and DirectX backends.
