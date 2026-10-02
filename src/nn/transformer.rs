@@ -1,5 +1,5 @@
 use crate::nn::rms_norm::RMSNorm;
-use crate::{FeedForward, MultiHeadAttention, Tensor};
+use crate::{Device, FeedForward, MultiHeadAttention, Tensor};
 
 pub struct TransformerBlock {
     // SYSTEMS ENGINEERING NOTE:
@@ -15,14 +15,16 @@ pub struct TransformerBlock {
 }
 
 impl TransformerBlock {
-    pub fn new(hidden_dim: usize, num_heads: usize) -> Self {
+    /// Constructs a new TransformerBlock with all sub-layers initialized on the target device.
+    pub fn new(hidden_dim: usize, num_heads: usize, device: &Device) -> Self {
         Self {
-            norm1: RMSNorm::new(hidden_dim),
-            mha: MultiHeadAttention::new(hidden_dim, num_heads),
-            norm2: RMSNorm::new(hidden_dim),
-            mlp: FeedForward::new(hidden_dim),
+            norm1: RMSNorm::new(hidden_dim, device),
+            mha: MultiHeadAttention::new(hidden_dim, num_heads, device),
+            norm2: RMSNorm::new(hidden_dim, device),
+            mlp: FeedForward::new(hidden_dim, device),
         }
     }
+
     pub fn forward(&self, x: &Tensor) -> Tensor {
         // Pre-Norm Architecture with Residual Connections
 
@@ -39,7 +41,7 @@ impl TransformerBlock {
         x
     }
 
-    pub fn to(&mut self, device: crate::Device) {
+    pub fn to(&mut self, device: Device) {
         self.norm1.to(device.clone());
         self.mha.to(device.clone());
         self.norm2.to(device.clone());
